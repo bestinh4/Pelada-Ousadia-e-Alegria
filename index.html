@@ -1,0 +1,121 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR" class="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Ousadia & Alegria - Pelada</title>
+    
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#e30613">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "firebase/app": "https://esm.sh/firebase@10.7.1/app",
+    "firebase/auth": "https://esm.sh/firebase@10.7.1/auth",
+    "firebase/firestore": "https://esm.sh/firebase@10.7.1/firestore",
+    "firebase/messaging": "https://esm.sh/firebase@10.7.1/messaging",
+    "@google/genai": "https://esm.sh/@google/genai",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "firebase/": "https://esm.sh/firebase@^12.9.0/",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.4"
+  }
+}
+</script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Bebas+Neue&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#e30613", // Vermelho Royal
+              "primary-bright": "#ff1a1a",
+              "navy": "#0051a2",    // Azul Profundo
+              "navy-deep": "#003a75",
+              "slate-bg": "#ffffff",
+              "glass-card": "rgba(255, 255, 255, 0.85)",
+              "glass-border": "#f1f5f9",
+              "success": "#10B981"
+            },
+            fontFamily: {
+              "display": ["Plus Jakarta Sans", "sans-serif"],
+              "condensed": ["Bebas Neue", "sans-serif"],
+            },
+            boxShadow: {
+              'elite': '0 10px 40px -10px rgba(0, 81, 162, 0.12)',
+              'glass': '0 12px 40px 0 rgba(0, 0, 0, 0.04)',
+              'glow-red': '0 0 20px rgba(227, 6, 19, 0.25)',
+              'soft-white': '0 8px 30px rgba(241, 245, 249, 0.5)',
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.5s ease-out',
+              'slide-up': 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
+              'float': 'float 3s ease-in-out infinite',
+              'mesh': 'meshMove 10s ease infinite',
+            },
+            keyframes: {
+              fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+              slideUp: { '0%': { transform: 'translateY(24px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } },
+              float: { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-6px)' } },
+              meshMove: {
+                '0%, 100%': { 'background-position': '0% 50%' },
+                '50%': { 'background-position': '100% 50%' }
+              }
+            }
+          },
+        },
+      }
+    </script>
+    <style type="text/tailwindcss">
+      @layer components {
+        .glass-surface {
+          @apply bg-glass-card backdrop-blur-[16px] border border-glass-border shadow-glass;
+        }
+        .bg-neo-dots {
+          background-color: #ffffff;
+          background-image: radial-gradient(#f1f5f9 1.5px, transparent 1.5px);
+          background-size: 24px 24px;
+        }
+        .mesh-gradient-champions {
+          background: linear-gradient(-45deg, #e30613, #0051a2, #003a75, #ff1a1a);
+          background-size: 400% 400%;
+          @apply animate-mesh;
+        }
+        .btn-croatia-primary {
+          background: linear-gradient(135deg, #e30613 0%, #ff1a1a 100%);
+          @apply text-white shadow-xl shadow-primary/20 active:scale-[0.97] transition-all;
+        }
+        .btn-croatia-secondary {
+          background: linear-gradient(135deg, #0051a2 0%, #003a75 100%);
+          @apply text-white shadow-xl shadow-navy/20 active:scale-[0.97] transition-all;
+        }
+      }
+      .hide-scrollbar::-webkit-scrollbar { display: none; }
+      * { -webkit-tap-highlight-color: transparent; }
+      body {
+        @apply bg-neo-dots font-display text-slate-900 antialiased overflow-x-hidden;
+      }
+    </style>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
