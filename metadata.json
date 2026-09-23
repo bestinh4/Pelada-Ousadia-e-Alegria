@@ -3,5 +3,8 @@
   "description": "Aplicativo para organização da pelada Ousadia \u0026 Alegria, com gestão de presença e financeiro.",
   "requestFramePermissions": [
     "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

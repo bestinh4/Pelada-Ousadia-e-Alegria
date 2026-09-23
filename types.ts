@@ -27,6 +27,8 @@ export interface Player {
   paymentStatus?: 'pago' | 'pendente';
   pushEnabled?: boolean;
   fcmToken?: string | null;
+  suplenteNextMatch?: boolean;
+  courtCheckIn?: boolean;
 }
 
 export interface Expense {
@@ -72,6 +74,7 @@ export interface Match {
   gkSlots: number;
   confirmedPlayers: number;
   createdAt: string;
+  fieldImageUrl?: string;
 }
 
 export interface MatchHistory {

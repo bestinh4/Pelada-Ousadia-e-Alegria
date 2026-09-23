@@ -109,10 +109,17 @@ export const sendPushNotification = async (title: string, body: string) => {
   try {
     console.log("🔔 Disparando notificação:", title);
     
+    // Trigger mobile physical vibration if supported
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([200, 100, 200]);
+      } catch {}
+    }
+
     const options = {
       body,
-      icon: 'https://images.weserv.nl/?url=https://i.postimg.cc/QCGV109g/Gemini-Generated-Image-xrrv8axrrv8axrrv-removebg-preview.png&w=192&h=192&fit=contain&padding=10',
-      badge: 'https://images.weserv.nl/?url=https://i.postimg.cc/QCGV109g/Gemini-Generated-Image-xrrv8axrrv8axrrv-removebg-preview.png&w=96&h=96&fit=contain',
+      icon: '/pwa-192x192.png',
+      badge: '/pwa-192x192.png',
       vibrate: [200, 100, 200, 100, 200],
       tag: 'oa-notification-' + Date.now(),
       renotify: true,

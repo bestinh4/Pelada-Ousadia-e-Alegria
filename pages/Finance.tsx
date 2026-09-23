@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { Player, Page, Expense, Match } from '../types.ts';
-import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
+import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
 import { db, doc, updateDoc, onSnapshot, collection, addDoc, deleteDoc } from '../services/firebase.ts';
 import { broadcastNotification } from '../services/notificationService.ts';
 
@@ -19,7 +18,6 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   const currentPlayer = players.find(p => p.id === currentUser?.uid);
   const isMasterUser = currentUser?.email === MASTER_ADMIN_EMAIL;
   const isUserAdmin = currentPlayer?.role === 'admin' || isMasterUser;
-  const mainLogoUrl = "https://i.postimg.cc/QCGV109g/Gemini-Generated-Image-xrrv8axrrv8axrrv-removebg-preview.png";
 
   useEffect(() => {
     const unsubPrices = onSnapshot(doc(db, "settings", "finance"), (docSnap) => {
@@ -38,33 +36,6 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   }, []);
 
   const activePlayers = players.filter(p => p.status === 'presente');
-  
-  const fieldSlots = match?.fieldSlots || 30;
-  const gkSlots = match?.gkSlots !== undefined ? match.gkSlots : 5;
-
-  const confirmedGKs = activePlayers.filter(p => p.position === 'Goleiro').sort((a, b) => {
-    const timeA = a.confirmedAt ? new Date(a.confirmedAt).getTime() : new Date(a.createdAt || 0).getTime();
-    const timeB = b.confirmedAt ? new Date(b.confirmedAt).getTime() : new Date(b.createdAt || 0).getTime();
-    return timeA - timeB;
-  });
-  
-  const confirmedField = activePlayers.filter(p => p.position !== 'Goleiro').sort((a, b) => {
-    const timeA = a.confirmedAt ? new Date(a.confirmedAt).getTime() : new Date(a.createdAt || 0).getTime();
-    const timeB = b.confirmedAt ? new Date(b.confirmedAt).getTime() : new Date(b.createdAt || 0).getTime();
-    return timeA - timeB;
-  });
-
-  const getWaitingInfo = (p: Player) => {
-    const isGk = p.position === 'Goleiro';
-    const list = isGk ? confirmedGKs : confirmedField;
-    const slots = isGk ? gkSlots : fieldSlots;
-    const index = list.findIndex(x => x.id === p.id);
-    
-    if (index >= slots) {
-      return { isInWaiting: true, position: index - slots + 1 };
-    }
-    return { isInWaiting: false, position: 0 };
-  };
 
   const checkIsExempt = (p: Player) => {
     const isGoleiro = p.position === 'Goleiro';
@@ -91,306 +62,275 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
     return filter === 'pagos' ? isPaid : !isPaid;
   });
 
+  const togglePaymentStatus = async (player: Player) => {
+    if (!isUserAdmin) return;
+    setLoadingId(player.id);
+    try {
+      const isMensalista = player.playerType === 'mensalista';
+      const updates: any = {};
+      if (isMensalista) {
+        updates.monthlyPaid = !player.monthlyPaid;
+      } else {
+        updates.paymentStatus = player.paymentStatus === 'pago' ? 'pendente' : 'pago';
+      }
+      await updateDoc(doc(db, "players", player.id), updates);
+    } catch {
+      alert("Erro ao atualizar pagamento.");
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const handleCreateExpense = async () => {
+    if (!newExpense.description || newExpense.amount <= 0) return alert("Preencha descrição e valor!");
+    setIsSavingExpense(true);
+    try {
+      await addDoc(collection(db, "expenses"), {
+        ...newExpense,
+        date: new Date().toISOString()
+      });
+      setIsAddingExpense(false);
+      setNewExpense({ description: '', amount: 0, category: 'Outros' });
+    } catch {
+      alert("Erro ao lançar despesa.");
+    } finally {
+      setIsSavingExpense(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col animate-fade-in px-4 sm:px-6">
-      <header className="py-8 sm:py-12 flex items-center justify-between">
-        <div className="space-y-1">
-          <h2 className="text-2xl sm:text-3xl font-black text-navy uppercase italic tracking-tighter leading-none">
-            COFRE O&A
-          </h2>
-          <p className="text-[9px] sm:text-[10px] font-black text-primary uppercase tracking-[0.4em]">
-            GESTOR FINANCEIRO
-          </p>
-        </div>
-        <div className="flex gap-2 sm:gap-4">
-          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white rounded-2xl flex items-center justify-center shadow-soft-white animate-float border border-slate-100 p-2">
-            <img src={mainLogoUrl} className="w-6 h-6 sm:w-8 sm:h-8 object-contain" />
-          </div>
-        </div>
-      </header>
+    <div className="flex flex-col w-full max-w-2xl mx-auto px-margin pb-space-xl gap-space-md animate-fade-in">
+      {/* HEADER CARD */}
+      <div className="relative w-full rounded-2xl bg-surface-container-lowest p-space-md shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40 transition-all">
+        {/* Stadium Aura Decoration */}
+        <div className="absolute -right-12 -top-12 w-44 h-44 rounded-full bg-primary-container/10 blur-2xl pointer-events-none animate-pulse-slow"></div>
+        <div className="absolute -left-12 -bottom-12 w-36 h-36 rounded-full bg-secondary/10 blur-2xl pointer-events-none"></div>
 
-      <main className="lg:grid lg:grid-cols-12 lg:gap-10 lg:items-start pb-48">
-        <div className="lg:col-span-5 space-y-8 sm:space-y-10">
-          <div className="bg-white border border-slate-100 rounded-[2.5rem] sm:rounded-[3rem] p-8 sm:p-10 relative overflow-hidden shadow-elite min-h-[300px] sm:min-h-[350px] flex flex-col justify-between">
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 sm:w-72 h-64 sm:h-72 opacity-[0.08] pointer-events-none animate-float">
-                <img src={mainLogoUrl} className="w-full h-full object-contain grayscale" />
-            </div>
-
-            <div className="relative z-10">
-              <span className="text-[9px] sm:text-[11px] font-black text-navy/30 uppercase tracking-[0.4em] block mb-2 sm:mb-4 italic">SALDO EM CAIXA</span>
-              <h2 className={`text-4xl sm:text-6xl font-condensed italic font-black tracking-tighter leading-none ${netBalance >= 0 ? 'text-navy' : 'text-primary'}`}>
-                R$ {netBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </h2>
-            </div>
-
-            <div className="relative z-10 grid grid-cols-2 gap-4 sm:gap-6 pt-8 sm:pt-10 border-t border-slate-50">
-              <div className="space-y-1 sm:space-y-2">
-                 <span className="text-[9px] sm:text-[10px] font-black text-success uppercase tracking-widest">RECEITAS</span>
-                 <p className="text-xl sm:text-2xl font-condensed italic font-black text-navy">R$ {totals.paid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+        <div className="relative z-10 flex flex-col gap-space-sm">
+          {/* Header Row: Title + Logo Badge */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <div className="w-10 h-10 rounded-xl bg-tertiary-container/15 text-tertiary-container flex items-center justify-center shrink-0 border border-tertiary-container/30">
+                <span className="material-symbols-outlined text-[22px]">account_balance_wallet</span>
               </div>
-              <div className="space-y-1 sm:space-y-2">
-                 <span className="text-[9px] sm:text-[10px] font-black text-primary uppercase tracking-widest">DESPESAS</span>
-                 <p className="text-xl sm:text-2xl font-condensed italic font-black text-navy">R$ {totalExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-tertiary animate-pulse"></span>
+                  <span className="font-headline-sm text-headline-sm text-navy-deep font-bold">
+                    Cofre & Finanças
+                  </span>
+                </div>
+                <span className="font-body-sm text-body-sm text-outline">
+                  Contabilidade O&A • Gestão de Mensalidades e PIX
+                </span>
               </div>
             </div>
-            
-            <div className="relative z-10 pt-6 flex justify-between items-center">
-              <div className="space-y-1">
-                 <span className="text-[8px] sm:text-[9px] font-black text-slate-300 uppercase tracking-widest">PENDENTE (A RECEBER)</span>
-                 <p className="text-lg sm:text-xl font-condensed italic font-black text-slate-400">R$ {totals.pending.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-              </div>
+
+            <div className="flex items-center gap-2">
+              <span className="bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">
+                FINANCEIRO
+              </span>
               {isUserAdmin && (
                 <button 
                   onClick={() => setIsAddingExpense(true)}
-                  className="w-10 h-10 sm:w-12 h-12 bg-navy text-white rounded-2xl flex items-center justify-center shadow-elite active:scale-90 transition-all"
-                  title="Adicionar Despesa"
+                  className="h-9 px-3 bg-gradient-to-r from-primary-container to-primary-bright text-on-primary rounded-xl font-headline-sm text-headline-sm flex items-center gap-1.5 shadow-sm active:scale-95 transition-transform"
                 >
-                  <span className="material-symbols-outlined">add_card</span>
+                  <span className="material-symbols-outlined text-[18px]">add_card</span>
+                  <span>DESPESA</span>
                 </button>
               )}
             </div>
           </div>
+        </div>
+      </div>
 
-          <div className="flex bg-white border border-slate-100 p-1.5 sm:p-2 rounded-full shadow-soft-white">
-            {(['receitas', 'despesas'] as const).map((v) => (
-              <button
-                key={v}
-                onClick={() => setFinView(v)}
-                className={`flex-1 py-3 sm:py-4 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] transition-all ${finView === v ? 'bg-navy text-white shadow-elite' : 'text-slate-300 hover:text-navy/60'}`}
-              >
-                {v.toUpperCase()}
-              </button>
-            ))}
+      {/* BALANCE VAULT CARD */}
+      <div className="bg-gradient-to-br from-navy-deep to-secondary text-canvas-white rounded-2xl p-space-md shadow-xl flex flex-col justify-between gap-space-md relative overflow-hidden">
+        <div>
+          <span className="font-label-caps text-label-caps text-on-secondary/70 uppercase tracking-widest block mb-1">
+            SALDO DISPONÍVEL EM CAIXA
+          </span>
+          <h2 className="font-scoreboard-num text-[44px] leading-none text-canvas-white tracking-wide">
+            R$ {netBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-canvas-white/10">
+          <div className="bg-canvas-white/10 backdrop-blur-md rounded-xl p-3">
+            <span className="font-label-md text-label-md text-tertiary-fixed font-bold uppercase block">RECEITAS</span>
+            <p className="font-headline-sm text-headline-sm text-canvas-white">
+              R$ {totals.paid.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div className="bg-canvas-white/10 backdrop-blur-md rounded-xl p-3">
+            <span className="font-label-md text-label-md text-primary-fixed font-bold uppercase block">DESPESAS</span>
+            <p className="font-headline-sm text-headline-sm text-canvas-white">
+              R$ {totalExpenses.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
           </div>
         </div>
 
-        <div className="lg:col-span-7 mt-8 sm:mt-10 lg:mt-0">
-          {finView === 'receitas' ? (
-            <div className="space-y-4 sm:space-y-6">
-              <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
-                <div className="flex bg-slate-50 border border-slate-100 p-1 rounded-full flex-1">
-                  {(['todos', 'pendentes', 'pagos'] as const).map((f) => (
+        <div className="flex items-center justify-between text-canvas-white/80 font-label-md text-label-md">
+          <span>Pendente de Cobrança:</span>
+          <span className="font-bold text-amber-300">
+            R$ {totals.pending.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+      </div>
+
+      {/* TABS: RECEITAS VS DESPESAS */}
+      <div className="flex p-1 bg-surface-container-high/60 rounded-xl gap-1">
+        <button
+          onClick={() => setFinView('receitas')}
+          className={`flex-1 py-2.5 rounded-lg font-headline-sm text-headline-sm transition-all ${
+            finView === 'receitas' ? 'bg-surface-container-lowest text-navy-deep shadow-sm font-bold' : 'text-on-surface-variant'
+          }`}
+        >
+          RECEITAS ({filteredPlayers.length})
+        </button>
+        <button
+          onClick={() => setFinView('despesas')}
+          className={`flex-1 py-2.5 rounded-lg font-headline-sm text-headline-sm transition-all ${
+            finView === 'despesas' ? 'bg-surface-container-lowest text-navy-deep shadow-sm font-bold' : 'text-on-surface-variant'
+          }`}
+        >
+          DESPESAS ({expenses.length})
+        </button>
+      </div>
+
+      {/* CONTENT: RECEITAS */}
+      {finView === 'receitas' ? (
+        <div className="flex flex-col gap-space-sm">
+          {/* Subfilter */}
+          <div className="flex gap-2">
+            {(['todos', 'pendentes', 'pagos'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`px-3 py-1.5 rounded-full font-label-md text-label-md uppercase font-semibold ${
+                  filter === f ? 'bg-navy-deep text-on-secondary' : 'bg-surface-container-lowest text-navy-deep hover:bg-surface-container-high'
+                }`}
+              >
+                {f === 'todos' ? 'Todos' : f === 'pendentes' ? 'Pendentes' : 'Pagos'}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {filteredPlayers.map(player => {
+              const isExempt = checkIsExempt(player);
+              const isPaid = isExempt || (player.playerType === 'mensalista' ? player.monthlyPaid : player.paymentStatus === 'pago');
+              const amount = isExempt ? 0 : (player.playerType === 'mensalista' ? prices.mensalista : prices.avulso);
+
+              return (
+                <div 
+                  key={player.id}
+                  className="p-space-sm rounded-xl bg-surface-container-lowest shadow-sm flex items-center justify-between gap-3 border border-surface-container-high/40"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-surface-container">
+                      <img src={player.photoUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-headline-sm text-headline-sm text-navy-deep break-words">
+                        {player.name}
+                      </h4>
+                      <p className="font-body-sm text-body-sm text-outline break-words">
+                        {player.position} • {player.playerType === 'mensalista' ? 'Mensalista' : 'Avulso'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-headline-sm text-headline-sm text-navy-deep">
+                      {isExempt ? 'ISENTO' : `R$ ${amount},00`}
+                    </span>
+
                     <button
-                      key={f}
-                      onClick={() => setFilter(f)}
-                      className={`flex-1 py-2 sm:py-3 rounded-full text-[8px] sm:text-[9px] font-black uppercase tracking-[0.1em] transition-all ${filter === f ? 'bg-white text-navy shadow-sm' : 'text-slate-400 hover:text-navy/60'}`}
+                      onClick={() => !isExempt && togglePaymentStatus(player)}
+                      disabled={isExempt || loadingId === player.id}
+                      className={`px-2.5 py-1 rounded-full font-label-md text-[11px] font-bold uppercase transition-all ${
+                        isPaid ? 'bg-tertiary-fixed text-on-tertiary-fixed' : 'bg-error-container text-on-error-container hover:opacity-80'
+                      }`}
                     >
-                      {f === 'todos' ? 'GERAL' : f === 'pendentes' ? 'DÉBITO' : 'QUITADO'}
+                      {isPaid ? 'PAGO' : 'PENDENTE'}
                     </button>
-                  ))}
+                  </div>
                 </div>
-                
-                {isUserAdmin && totals.pending > 0 && (
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* CONTENT: DESPESAS */
+        <div className="flex flex-col gap-2">
+          {expenses.map(expense => (
+            <div 
+              key={expense.id}
+              className="p-space-sm rounded-xl bg-surface-container-lowest shadow-sm flex items-center justify-between border border-surface-container-high/40"
+            >
+              <div>
+                <h4 className="font-headline-sm text-headline-sm text-navy-deep">{expense.description}</h4>
+                <p className="font-body-sm text-body-sm text-outline">{expense.category}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-headline-sm text-headline-sm text-error">
+                  - R$ {expense.amount.toFixed(2)}
+                </span>
+                {isUserAdmin && (
                   <button 
                     onClick={async () => {
-                      if (confirm(`Deseja enviar um lembrete para os atletas com pagamentos pendentes?`)) {
-                        setIsSendingReminder(true);
-                        try {
-                          await broadcastNotification(
-                            "💰 COFRE O&A: LEMBRETE", 
-                            "Olá, craque! Notamos que seu pagamento da pelada ainda não caiu. Fortalece o nosso cofre para mantermos a arena nota 10! 🙏⚽",
-                            currentUser.uid
-                          );
-                          alert("Lembrete enviado com sucesso!");
-                        } catch (e) {
-                          alert("Erro ao enviar lembrete.");
-                        } finally {
-                          setIsSendingReminder(false);
-                        }
+                      if (confirm("Excluir esta despesa?")) {
+                        await deleteDoc(doc(db, "expenses", expense.id));
                       }
                     }}
-                    disabled={isSendingReminder}
-                    className="h-10 sm:h-12 px-6 bg-navy text-white rounded-2xl flex items-center justify-center gap-2 shadow-elite active:scale-95 transition-all text-[9px] font-black uppercase tracking-widest disabled:opacity-50"
+                    className="text-outline hover:text-error p-1"
                   >
-                    <span className="material-symbols-outlined text-lg">campaign</span>
-                    COBRAR PENDENTES
+                    <span className="material-symbols-outlined text-[18px]">delete</span>
                   </button>
                 )}
               </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:gap-4">
-                {filteredPlayers.map((p) => {
-                  const isExempt = checkIsExempt(p);
-                  const isPaid = isExempt || (p.playerType === 'mensalista' ? p.monthlyPaid : p.paymentStatus === 'pago');
-                  const waitingInfo = getWaitingInfo(p);
-                  const playerPrice = p.playerType === 'mensalista' ? prices.mensalista : prices.avulso;
-                  
-                  return (
-                    <div key={p.id} className={`bg-white border rounded-[2rem] sm:rounded-[2.5rem] p-4 sm:p-6 flex items-center justify-between shadow-soft-white group transition-all ${!isPaid ? 'border-primary/20 bg-primary/[0.02]' : 'border-slate-100 hover:border-navy/20'}`}>
-                      <div className="flex items-center gap-3 sm:gap-5">
-                        <div className="relative">
-                          <img src={p.photoUrl} className={`w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl object-cover border ${!isPaid ? 'border-primary/30' : 'border-slate-50'}`} alt="" />
-                          <div className={`absolute -bottom-1 -right-1 w-5 h-5 sm:w-7 sm:h-7 rounded-full border-2 border-white flex items-center justify-center shadow-md ${isPaid ? 'bg-success' : 'bg-primary animate-pulse'}`}>
-                             <span className="material-symbols-outlined text-white text-[10px] sm:text-[14px] font-black">{isPaid ? 'check' : 'priority_high'}</span>
-                          </div>
-                        </div>
-                        <div className="space-y-0.5 sm:space-y-1">
-                          <div className="flex items-center gap-2 sm:gap-3">
-                            <h4 className="text-sm sm:text-[16px] font-black text-navy uppercase italic leading-none">{p.name}</h4>
-                            {waitingInfo.isInWaiting && (
-                              <span className="bg-amber-500 text-white text-[7px] sm:text-[8px] font-black px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg uppercase tracking-widest animate-bounce">
-                                #{waitingInfo.position}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5 sm:gap-2">
-                             <p className="text-[8px] sm:text-[9px] font-black text-slate-300 uppercase tracking-widest">{isExempt ? (p.position === 'Goleiro' ? 'GOLEIRO' : 'DIRETORIA') : p.playerType.toUpperCase()}</p>
-                             {isExempt && <span className="text-[8px] sm:text-[9px] font-black text-primary uppercase">ISENTO</span>}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 sm:gap-6">
-                        {!isPaid && !isExempt && (
-                          <div className="text-right">
-                            <p className="text-lg sm:text-2xl font-condensed italic font-black text-primary leading-none">R$ {playerPrice}</p>
-                            <p className="text-[7px] sm:text-[8px] font-black text-primary/40 uppercase tracking-widest">PENDENTE</p>
-                          </div>
-                        )}
-                        
-                        {isUserAdmin && !isExempt && (
-                          <button 
-                            onClick={async () => {
-                              setLoadingId(p.id);
-                              const pRef = doc(db, "players", p.id);
-                              if (p.playerType === 'mensalista') await updateDoc(pRef, { monthlyPaid: !p.monthlyPaid });
-                              else await updateDoc(pRef, { paymentStatus: p.paymentStatus === 'pago' ? 'pendente' : 'pago' });
-                              setLoadingId(null);
-                            }}
-                            className={`h-10 sm:h-12 px-4 sm:px-6 rounded-xl sm:rounded-2xl text-[8px] sm:text-[10px] font-black uppercase tracking-widest transition-all ${isPaid ? 'bg-slate-50 text-slate-400 border border-slate-100' : 'bg-primary text-white shadow-glow-red active:scale-95'}`}
-                          >
-                            {loadingId === p.id ? '...' : (isPaid ? 'REVERTER' : 'QUITAR')}
-                          </button>
-                        )}
-                        
-                        {isExempt && (
-                           <div className="h-10 sm:h-12 px-4 sm:px-6 flex items-center text-[8px] sm:text-[10px] font-black text-slate-200 uppercase tracking-widest">
-                              LIBERADO
-                           </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:gap-6">
-              {expenses.length > 0 ? expenses.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((e) => (
-                <div key={e.id} className="bg-white border border-slate-100 rounded-[2rem] sm:rounded-[2.5rem] p-4 sm:p-6 flex items-center justify-between shadow-soft-white group hover:border-navy/20 transition-all">
-                  <div className="flex items-center gap-3 sm:gap-5">
-                    <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-slate-50 flex items-center justify-center text-navy border border-slate-100">
-                      <span className="material-symbols-outlined text-xl sm:text-2xl">receipt_long</span>
-                    </div>
-                    <div>
-                      <h4 className="text-sm sm:text-[15px] font-black text-navy uppercase italic leading-none mb-1 sm:mb-1.5">{e.description}</h4>
-                      <p className="text-[8px] sm:text-[9px] font-black text-slate-300 uppercase tracking-widest">{e.category} • {new Date(e.date).toLocaleDateString('pt-BR')}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <p className="text-lg sm:text-xl font-condensed italic font-black text-primary leading-none">R$ {e.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                    {isUserAdmin && (
-                      <button 
-                        onClick={async () => {
-                          if (confirm("Excluir este gasto?")) {
-                            await deleteDoc(doc(db, "expenses", e.id));
-                          }
-                        }}
-                        className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-red-50 text-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
-                      >
-                        <span className="material-symbols-outlined text-xs sm:text-sm">delete</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )) : (
-                <div className="py-16 sm:py-20 text-center bg-slate-50 border border-dashed border-slate-100 rounded-[2.5rem] sm:rounded-[3rem]">
-                  <p className="text-[9px] sm:text-[10px] font-black text-slate-300 uppercase tracking-widest italic">Nenhuma despesa registrada</p>
-                </div>
-              )}
-            </div>
-          )}
+          ))}
         </div>
-      </main>
+      )}
 
+      {/* MODAL: NOVA DESPESA */}
       {isAddingExpense && (
-        <div className="fixed inset-0 bg-navy/60 backdrop-blur-md z-[2000] flex items-center justify-center p-6">
-           <div className="w-full max-w-[400px] bg-white rounded-[3rem] shadow-2xl overflow-hidden animate-slide-up">
-              <div className="p-8 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                 <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                       <span className="material-symbols-outlined text-2xl">add_card</span>
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-black text-navy uppercase italic tracking-tighter leading-none">NOVO GASTO</h3>
-                      <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mt-1">REGISTRO DE SAÍDA</p>
-                    </div>
-                 </div>
-                 <button onClick={() => setIsAddingExpense(false)} className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-300 active:scale-90">
-                    <span className="material-symbols-outlined">close</span>
-                 </button>
-              </div>
-              
-              <div className="p-8 space-y-6">
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest px-1">DESCRIÇÃO</label>
-                    <input 
-                      type="text" 
-                      value={newExpense.description} 
-                      onChange={e => setNewExpense({...newExpense, description: e.target.value})} 
-                      placeholder="Ex: Aluguel da Quadra"
-                      className="w-full h-16 bg-slate-50 rounded-2xl border border-slate-100 px-6 font-black text-navy outline-none focus:border-primary" 
-                    />
-                 </div>
-
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest px-1">VALOR (R$)</label>
-                    <input 
-                      type="number" 
-                      value={newExpense.amount} 
-                      onChange={e => setNewExpense({...newExpense, amount: Number(e.target.value)})} 
-                      className="w-full h-16 bg-slate-50 rounded-2xl border border-slate-100 px-6 font-black text-navy text-2xl outline-none focus:border-primary" 
-                    />
-                 </div>
-
-                 <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest px-1">CATEGORIA</label>
-                    <select 
-                      value={newExpense.category} 
-                      onChange={e => setNewExpense({...newExpense, category: e.target.value})} 
-                      className="w-full h-16 bg-slate-50 rounded-2xl border border-slate-100 px-6 font-black text-navy outline-none focus:border-primary"
-                    >
-                      <option value="Quadra">Quadra</option>
-                      <option value="Equipamento">Equipamento</option>
-                      <option value="Evento">Evento</option>
-                      <option value="Outros">Outros</option>
-                    </select>
-                 </div>
-
-                 <button 
-                  onClick={async () => {
-                    if (!newExpense.description || newExpense.amount <= 0) return alert("Preencha os dados corretamente.");
-                    setIsSavingExpense(true);
-                    try {
-                      await addDoc(collection(db, "expenses"), {
-                        ...newExpense,
-                        date: new Date().toISOString()
-                      });
-                      setIsAddingExpense(false);
-                      setNewExpense({ description: '', amount: 0, category: 'Outros' });
-                    } catch (e) {
-                      alert("Erro ao salvar gasto.");
-                    } finally {
-                      setIsSavingExpense(false);
-                    }
-                  }}
-                  disabled={isSavingExpense}
-                  className="w-full h-20 bg-navy text-white rounded-[2rem] font-black uppercase text-[12px] tracking-[0.2em] shadow-elite active:scale-95 transition-all mt-4"
-                 >
-                    {isSavingExpense ? <div className="w-6 h-6 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto"></div> : "REGISTRAR GASTO"}
-                 </button>
-              </div>
-           </div>
+        <div className="fixed inset-0 bg-navy-deep/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-canvas-white rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
+            <h3 className="font-headline-lg-mobile text-headline-lg-mobile text-navy-deep">
+              LANÇAR DESPESA
+            </h3>
+            <div className="space-y-2">
+              <input 
+                type="text" 
+                placeholder="Descrição (ex: Aluguel da Quadra)"
+                value={newExpense.description}
+                onChange={(e) => setNewExpense({ ...newExpense, description: e.target.value })}
+                className="w-full p-2.5 rounded-lg bg-surface-container-low border border-surface-container-high outline-none font-body-md"
+              />
+              <input 
+                type="number" 
+                placeholder="Valor (R$)"
+                value={newExpense.amount || ''}
+                onChange={(e) => setNewExpense({ ...newExpense, amount: Number(e.target.value) })}
+                className="w-full p-2.5 rounded-lg bg-surface-container-low border border-surface-container-high outline-none font-body-md"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setIsAddingExpense(false)} className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface font-label-md">
+                Cancelar
+              </button>
+              <button 
+                onClick={handleCreateExpense} 
+                disabled={isSavingExpense}
+                className="px-5 py-2 rounded-lg bg-primary-container text-on-primary font-headline-sm"
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

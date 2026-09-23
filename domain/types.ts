@@ -13,6 +13,8 @@ export interface Player {
   status: 'presente' | 'pendente';
   playerType: 'mensalista' | 'avulso';
   role?: 'admin' | 'player';
+  suplenteNextMatch?: boolean;
+  courtCheckIn?: boolean;
 }
 
 export interface Team {
@@ -38,4 +40,7 @@ export interface MatchSession {
     startedAt: number | null; // Timestamp
   } | null;
   createdAt: number;
+  drawDate?: string;
+  courtPresence?: Record<string, boolean>;
+  reserves?: string[]; // Atletas suplentes / excedentes além dos 24 de linha e 4 goleiros
 }

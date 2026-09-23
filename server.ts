@@ -33,67 +33,60 @@ async function startServer() {
     console.error("❌ Erro ao inicializar Firebase Admin:", err);
   }
 
-  const db = admin.firestore();
-  const messaging = admin.messaging();
+  // Listener para novas notificações no Firestore (Apenas quando service account estiver configurada)
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    try {
+      const db = admin.firestore();
+      const messaging = admin.messaging();
 
-  // Listener para novas notificações no Firestore
-  // Quando um novo documento é adicionado à coleção 'notifications', enviamos via FCM
-  db.collection("notifications").orderBy("createdAt", "desc").limit(1).onSnapshot(async (snapshot) => {
-    if (snapshot.empty) return;
-    
-    const doc = snapshot.docs[0];
-    const data = doc.data();
-    
-    // Evita enviar notificações antigas (mais de 1 minuto)
-    const createdAt = new Date(data.createdAt).getTime();
-    if (Date.now() - createdAt > 60000) return;
-
-    console.log("🔔 Nova notificação detectada no Firestore:", data.title);
-
-    // Buscar todos os tokens de push dos jogadores
-    const playersSnap = await db.collection("players").where("pushEnabled", "==", true).get();
-    const tokens: string[] = [];
-    
-    playersSnap.forEach(pDoc => {
-      const pData = pDoc.data();
-      if (pData.fcmToken) {
-        tokens.push(pData.fcmToken);
-      }
-    });
-
-    if (tokens.length > 0) {
-      console.log(`🚀 Enviando push para ${tokens.length} dispositivos...`);
-      const message = {
-        notification: {
-          title: data.title,
-          body: data.body,
-        },
-        data: {
-          url: "/",
-        },
-        tokens: tokens,
-      };
-
-      try {
-        const response = await messaging.sendEachForMulticast(message);
-        console.log(`✅ ${response.successCount} notificações enviadas com sucesso.`);
+      db.collection("notifications").orderBy("createdAt", "desc").limit(1).onSnapshot(async (snapshot) => {
+        if (snapshot.empty) return;
         
-        // Limpar tokens inválidos
-        if (response.failureCount > 0) {
-          const failedTokens: string[] = [];
-          response.responses.forEach((resp, idx) => {
-            if (!resp.success) {
-              failedTokens.push(tokens[idx]);
-            }
-          });
-          console.log(`🗑️ Removendo ${failedTokens.length} tokens inválidos.`);
-          // Aqui poderíamos remover os tokens do Firestore
+        const doc = snapshot.docs[0];
+        const data = doc.data();
+        
+        const createdAt = new Date(data.createdAt).getTime();
+        if (Date.now() - createdAt > 60000) return;
+
+        console.log("🔔 Nova notificação detectada no Firestore:", data.title);
+
+        const playersSnap = await db.collection("players").where("pushEnabled", "==", true).get();
+        const tokens: string[] = [];
+        
+        playersSnap.forEach(pDoc => {
+          const pData = pDoc.data();
+          if (pData.fcmToken) {
+            tokens.push(pData.fcmToken);
+          }
+        });
+
+        if (tokens.length > 0) {
+          console.log(`🚀 Enviando push para ${tokens.length} dispositivos...`);
+          const message = {
+            notification: {
+              title: data.title,
+              body: data.body,
+            },
+            data: {
+              url: "/",
+            },
+            tokens: tokens,
+          };
+
+          try {
+            const response = await messaging.sendEachForMulticast(message);
+            console.log(`✅ ${response.successCount} notificações enviadas com sucesso.`);
+          } catch (error) {
+            console.error("❌ Erro ao enviar via FCM:", error);
+          }
         }
-      } catch (error) {
-        console.error("❌ Erro ao enviar via FCM:", error);
-      }
+      });
+    } catch (e) {
+      console.warn("⚠️ Não foi possível iniciar listener FCM server-side:", e);
     }
-  });
+  } else {
+    console.log("ℹ️ Servidor rodando sem credencial FCM server-side. Notificações in-app ativas via client.");
+  }
 
   app.use(express.json());
 

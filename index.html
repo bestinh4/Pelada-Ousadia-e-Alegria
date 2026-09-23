@@ -7,115 +7,222 @@
     <title>Ousadia & Alegria - Pelada</title>
     
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#e30613">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <meta name="theme-color" content="#003a75">
+    <meta name="description" content="Gestão oficial da pelada Ousadia & Alegria">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
-    <script type="importmap">
-{
-  "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
-    "react-dom": "https://esm.sh/react-dom@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "firebase/app": "https://esm.sh/firebase@10.7.1/app",
-    "firebase/auth": "https://esm.sh/firebase@10.7.1/auth",
-    "firebase/firestore": "https://esm.sh/firebase@10.7.1/firestore",
-    "firebase/messaging": "https://esm.sh/firebase@10.7.1/messaging",
-    "@google/genai": "https://esm.sh/@google/genai",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "firebase/": "https://esm.sh/firebase@^12.9.0/",
-    "vite": "https://esm.sh/vite@^7.3.1",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.4"
-  }
-}
-</script>
-
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Bebas+Neue&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;0,900;1,700;1,800&family=Bebas+Neue&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,600;1,700;1,800&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet" />
     
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <script>
+    <script id="tailwind-config">
       tailwind.config = {
+        darkMode: "class",
         theme: {
           extend: {
             colors: {
-              "primary": "#e30613", // Vermelho Royal
+              "on-tertiary": "#ffffff",
+              "secondary-container": "#75a9ff",
+              "outline": "#936e69",
+              "dot-grid": "#f1f5f9",
+              "tertiary-fixed": "#6ffbbe",
+              "on-tertiary-fixed-variant": "#005236",
+              "inverse-surface": "#283044",
+              "surface": "#faf8ff",
+              "tertiary-container": "#008158",
+              "on-surface-variant": "#5e3f3b",
+              "background": "#faf8ff",
+              "on-error": "#ffffff",
+              "on-surface": "#131b2e",
+              "glass-surface": "rgba(255, 255, 255, 0.85)",
+              "on-primary-fixed-variant": "#930007",
+              "surface-container": "#eaedff",
+              "on-secondary-fixed-variant": "#00468d",
+              "surface-container-high": "#e2e7ff",
+              "tertiary": "#006545",
+              "surface-bright": "#faf8ff",
+              "canvas-white": "#ffffff",
+              "surface-container-lowest": "#ffffff",
+              "on-tertiary-fixed": "#002113",
+              "tertiary-fixed-dim": "#4edea3",
+              "error": "#ba1a1a",
+              "secondary": "#1d5daf",
+              "primary-fixed": "#ffdad5",
+              "primary-container": "#e30613",
+              "surface-container-low": "#f2f3ff",
+              "secondary-fixed": "#d6e3ff",
+              "surface-dim": "#d2d9f4",
               "primary-bright": "#ff1a1a",
-              "navy": "#0051a2",    // Azul Profundo
+              "on-primary": "#ffffff",
+              "surface-tint": "#c0000c",
+              "surface-variant": "#dae2fd",
+              "on-primary-container": "#fff5f3",
+              "error-container": "#ffdad6",
               "navy-deep": "#003a75",
-              "slate-bg": "#ffffff",
-              "glass-card": "rgba(255, 255, 255, 0.85)",
+              "on-secondary": "#ffffff",
+              "on-background": "#131b2e",
+              "on-tertiary-container": "#dbffe9",
+              "on-secondary-fixed": "#001b3e",
+              "on-primary-fixed": "#410001",
+              "secondary-fixed-dim": "#aac7ff",
+              "surface-container-highest": "#dae2fd",
+              "inverse-primary": "#ffb4aa",
+              "primary": "#b5000b",
+              "primary-deep": "#930007",
+              "inverse-on-surface": "#eef0ff",
+              "on-secondary-container": "#003c7c",
+              "primary-fixed-dim": "#ffb4aa",
+              "on-error-container": "#93000a",
+              "outline-variant": "#e9bcb6",
               "glass-border": "#f1f5f9",
-              "success": "#10B981"
+              // Compatibility aliases
+              "navy": "#003a75",
+              "navy-light": "#1d5daf",
+              "slate-bg": "#faf8ff"
+            },
+            borderRadius: {
+              "DEFAULT": "0.25rem",
+              "lg": "0.5rem",
+              "xl": "0.75rem",
+              "2xl": "1rem",
+              "3xl": "1.5rem",
+              "full": "9999px"
+            },
+            spacing: {
+              "space-md": "1rem",
+              "margin-lg": "3rem",
+              "space-xs": "0.25rem",
+              "space-xl": "2rem",
+              "margin": "1rem",
+              "gutter": "1rem",
+              "space-sm": "0.5rem",
+              "margin-md": "2rem",
+              "space-lg": "1.5rem",
+              "gutter-md": "1.5rem"
             },
             fontFamily: {
-              "display": ["Plus Jakarta Sans", "sans-serif"],
-              "condensed": ["Bebas Neue", "sans-serif"],
+              "headline-lg-mobile": ["'Barlow Condensed'", "'Bebas Neue'", "sans-serif"],
+              "headline-sm": ["'Plus Jakarta Sans'", "sans-serif"],
+              "body-lg": ["'Plus Jakarta Sans'", "sans-serif"],
+              "headline-md": ["'Plus Jakarta Sans'", "sans-serif"],
+              "scoreboard-num": ["'Barlow Condensed'", "'Bebas Neue'", "sans-serif"],
+              "label-caps": ["'Barlow Condensed'", "'Bebas Neue'", "sans-serif"],
+              "display-hero": ["'Barlow Condensed'", "'Bebas Neue'", "sans-serif"],
+              "label-lg": ["'Plus Jakarta Sans'", "sans-serif"],
+              "display-hero-mobile": ["'Barlow Condensed'", "'Bebas Neue'", "sans-serif"],
+              "body-md": ["'Plus Jakarta Sans'", "sans-serif"],
+              "headline-lg": ["'Barlow Condensed'", "'Bebas Neue'", "sans-serif"],
+              "body-sm": ["'Plus Jakarta Sans'", "sans-serif"],
+              "label-md": ["'Plus Jakarta Sans'", "sans-serif"],
+              "bebas": ["'Bebas Neue'", "sans-serif"],
+              "barlow": ["'Barlow Condensed'", "sans-serif"],
+              "jakarta": ["'Plus Jakarta Sans'", "sans-serif"],
+              "sans": ["'Plus Jakarta Sans'", "system-ui", "-apple-system", "sans-serif"],
+              "display": ["'Barlow Condensed'", "'Bebas Neue'", "sans-serif"]
+            },
+            fontSize: {
+              "headline-lg-mobile": ["28px", { "lineHeight": "32px", "letterSpacing": "0.5px", "fontWeight": "400" }],
+              "headline-sm": ["16px", { "lineHeight": "24px", "fontWeight": "600" }],
+              "body-lg": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+              "headline-md": ["20px", { "lineHeight": "28px", "fontWeight": "700" }],
+              "scoreboard-num": ["48px", { "lineHeight": "48px", "letterSpacing": "1px", "fontWeight": "400" }],
+              "label-caps": ["16px", { "lineHeight": "18px", "letterSpacing": "1.5px", "fontWeight": "400" }],
+              "display-hero": ["64px", { "lineHeight": "64px", "letterSpacing": "1px", "fontWeight": "400" }],
+              "label-lg": ["14px", { "lineHeight": "20px", "letterSpacing": "0.2px", "fontWeight": "600" }],
+              "display-hero-mobile": ["44px", { "lineHeight": "44px", "letterSpacing": "0.5px", "fontWeight": "400" }],
+              "body-md": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+              "headline-lg": ["36px", { "lineHeight": "40px", "letterSpacing": "0.5px", "fontWeight": "400" }],
+              "body-sm": ["12px", { "lineHeight": "16px", "fontWeight": "400" }],
+              "label-md": ["12px", { "lineHeight": "16px", "letterSpacing": "0.5px", "fontWeight": "600" }]
             },
             boxShadow: {
-              'elite': '0 10px 40px -10px rgba(0, 81, 162, 0.12)',
-              'glass': '0 12px 40px 0 rgba(0, 0, 0, 0.04)',
-              'glow-red': '0 0 20px rgba(227, 6, 19, 0.25)',
-              'soft-white': '0 8px 30px rgba(241, 245, 249, 0.5)',
+              'elite': '0 12px 36px -8px rgba(0, 58, 117, 0.1), 0 4px 12px -2px rgba(0, 58, 117, 0.05)',
+              'elite-card': '0 16px 44px -10px rgba(0, 58, 117, 0.08), 0 2px 8px 0 rgba(0, 0, 0, 0.02)',
+              'glow-red': '0 10px 30px -4px rgba(227, 6, 19, 0.35)',
+              'glow-navy': '0 10px 30px -4px rgba(0, 58, 117, 0.25)',
+              'glow-emerald': '0 10px 30px -4px rgba(0, 129, 88, 0.35)',
             },
             animation: {
-              'fade-in': 'fadeIn 0.5s ease-out',
-              'slide-up': 'slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1)',
-              'float': 'float 3s ease-in-out infinite',
-              'mesh': 'meshMove 10s ease infinite',
+              'fade-in': 'fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              'slide-up': 'slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              'bounce-slow': 'bounceSlow 2.5s ease-in-out infinite',
+              'pulse-slow': 'pulseSlow 2.5s ease-in-out infinite',
+              'pulse-glow': 'pulseGlow 2s ease-in-out infinite',
+              'pop-in': 'popIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+              'goal-cheer': 'goalCheer 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
             },
             keyframes: {
-              fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
-              slideUp: { '0%': { transform: 'translateY(24px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } },
-              float: { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-6px)' } },
-              meshMove: {
-                '0%, 100%': { 'background-position': '0% 50%' },
-                '50%': { 'background-position': '100% 50%' }
-              }
+              fadeIn: { '0%': { opacity: '0', transform: 'scale(0.98)' }, '100%': { opacity: '1', transform: 'scale(1)' } },
+              slideUp: { '0%': { opacity: '0', transform: 'translateY(16px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+              bounceSlow: { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-6px)' } },
+              pulseSlow: { '0%, 100%': { opacity: '1' }, '50%': { opacity: '0.75' } },
+              pulseGlow: { '0%, 100%': { transform: 'scale(1)', opacity: '1' }, '50%': { transform: 'scale(1.05)', opacity: '0.85' } },
+              popIn: { '0%': { transform: 'scale(0.85)', opacity: '0' }, '100%': { transform: 'scale(1)', opacity: '1' } },
+              goalCheer: { '0%': { transform: 'scale(1)' }, '50%': { transform: 'scale(1.2) rotate(4deg)' }, '100%': { transform: 'scale(1)' } }
             }
           },
         },
       }
     </script>
     <style type="text/tailwindcss">
-      @layer components {
-        .glass-surface {
-          @apply bg-glass-card backdrop-blur-[16px] border border-glass-border shadow-glass;
+      @layer base {
+        html, body {
+          width: 100vw;
+          margin: 0;
+          padding: 0;
         }
-        .bg-neo-dots {
-          background-color: #ffffff;
-          background-image: radial-gradient(#f1f5f9 1.5px, transparent 1.5px);
-          background-size: 24px 24px;
+        body {
+          overscroll-behavior: none;
         }
-        .mesh-gradient-champions {
-          background: linear-gradient(-45deg, #e30613, #0051a2, #003a75, #ff1a1a);
-          background-size: 400% 400%;
-          @apply animate-mesh;
+        .pb-safe {
+          padding-bottom: env(safe-area-inset-bottom, 0px);
         }
-        .btn-croatia-primary {
-          background: linear-gradient(135deg, #e30613 0%, #ff1a1a 100%);
-          @apply text-white shadow-xl shadow-primary/20 active:scale-[0.97] transition-all;
-        }
-        .btn-croatia-secondary {
-          background: linear-gradient(135deg, #0051a2 0%, #003a75 100%);
-          @apply text-white shadow-xl shadow-navy/20 active:scale-[0.97] transition-all;
+        .pt-safe {
+          padding-top: env(safe-area-inset-top, 0px);
         }
       }
-      .hide-scrollbar::-webkit-scrollbar { display: none; }
-      * { -webkit-tap-highlight-color: transparent; }
+      ::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      .dot-matrix-bg {
+        background-color: #faf8ff;
+        background-image: radial-gradient(#f1f5f9 1.5px, transparent 1.5px);
+        background-size: 24px 24px;
+      }
+      .glass-surface {
+        background: rgba(255, 255, 255, 0.9);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+      *, ::before, ::after {
+        -webkit-tap-highlight-color: transparent;
+      }
       body {
-        @apply bg-neo-dots font-display text-slate-900 antialiased overflow-x-hidden;
+        background-color: #faf8ff;
+        color: #131b2e;
+        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        letter-spacing: -0.012em;
+        min-height: max(884px, 100dvh);
       }
     </style>
   <link rel="stylesheet" href="/index.css">
 </head>
-  <body>
-    <div id="root"></div>
+  <body class="bg-surface dot-matrix-bg text-on-surface font-body-md text-body-md flex flex-col min-h-screen">
+    <div id="root" class="flex-1 flex flex-col min-h-screen"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>

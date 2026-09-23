@@ -15,11 +15,14 @@ const messaging = firebase.messaging();
 
 console.log("🛠️ Service Worker carregado!");
 
-const CACHE_NAME = 'oa-elite-pro-v8'; // Incrementado para v8
+const CACHE_NAME = 'oa-elite-pro-v9';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/manifest.json'
+  '/manifest.json',
+  '/pwa-192x192.png',
+  '/pwa-512x512.png',
+  '/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -106,8 +109,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: 'https://images.weserv.nl/?url=https://i.postimg.cc/QCGV109g/Gemini-Generated-Image-xrrv8axrrv8axrrv-removebg-preview.png&w=192&h=192&fit=contain&padding=10',
-    badge: 'https://images.weserv.nl/?url=https://i.postimg.cc/QCGV109g/Gemini-Generated-Image-xrrv8axrrv8axrrv-removebg-preview.png&w=96&h=96&fit=contain',
+    icon: '/pwa-192x192.png',
+    badge: '/pwa-192x192.png',
     vibrate: [200, 100, 200, 100, 200],
     tag: 'oa-notification',
     renotify: true,

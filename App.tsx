@@ -10,28 +10,67 @@ import Finance from './pages/Finance.tsx';
 import CreateMatch from './pages/CreateMatch.tsx';
 import Profile from './pages/Profile.tsx';
 import TeamBalancing from './pages/TeamBalancing.tsx';
-import ArenaPanel from './pages/ArenaPanel.tsx';
 import NotificationToast, { Notification as InAppNotification } from './components/NotificationToast.tsx';
+import { MaintenanceScreen } from './components/MaintenanceScreen.tsx';
 import { Page, Player, Match } from './types.ts';
-import { MASTER_ADMIN_EMAIL } from './constants.tsx';
+import { MASTER_ADMIN_EMAIL, MOCK_PLAYERS, CURRENT_MATCH } from './constants.tsx';
 import { auth, db, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, limit, where } from './services/firebase.ts';
 import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications } from './services/notificationService.ts';
 import { playSound } from './utils/sound.ts';
 
+const DEFAULT_PREVIEW_USER = {
+  uid: 'master_admin_diogo',
+  email: MASTER_ADMIN_EMAIL,
+  displayName: 'Diogo (Admin)',
+  photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+};
+
 const App: React.FC = () => {
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState<Page>(() => {
-    const saved = localStorage.getItem('oa_current_page');
-    return saved ? (saved as Page) : Page.Login;
+  const [user, setUser] = useState<any>(() => {
+    const saved = localStorage.getItem('oa_preview_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch {}
+    }
+    const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
+    if (!hasLoggedOut) {
+      // Abre direto com a conta Master Diogo para visualização instantânea no preview
+      return DEFAULT_PREVIEW_USER;
+    }
+    return null;
   });
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [currentMatch, setCurrentMatch] = useState<Match | null>(null);
-  const currentMatchRef = useRef<Match | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState<Page>(() => {
+    const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
+    if (hasLoggedOut) return Page.Login;
+    const saved = localStorage.getItem('oa_current_page');
+    return saved && saved !== Page.Login && saved !== Page.Onboarding ? (saved as Page) : Page.Dashboard;
+  });
+
+  const [players, setPlayers] = useState<Player[]>(MOCK_PLAYERS);
+  const [currentMatch, setCurrentMatch] = useState<Match | null>(CURRENT_MATCH);
+  const currentMatchRef = useRef<Match | null>(CURRENT_MATCH);
   const [inAppNotifications, setInAppNotifications] = useState<InAppNotification[]>([]);
+  const [isMaintenance, setIsMaintenance] = useState(false);
+  const [adminPreviewMaintenance, setAdminPreviewMaintenance] = useState(false);
   
   const prevPlayersState = useRef<Record<string, Player>>({});
   const lastNotificationId = useRef<string | null>(null);
+
+  // Listener para status global de Manutenção
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "settings", "system"), (snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        setIsMaintenance(!!d?.isMaintenance);
+      } else {
+        setIsMaintenance(false);
+      }
+    }, () => {
+      setIsMaintenance(false);
+    });
+    return () => unsub();
+  }, []);
 
   // Persistir página atual
   useEffect(() => {
@@ -39,6 +78,21 @@ const App: React.FC = () => {
       localStorage.setItem('oa_current_page', currentPage);
     }
   }, [currentPage]);
+
+  const handleDirectLogin = (mockUser: any) => {
+    localStorage.removeItem('oa_has_logged_out');
+    localStorage.setItem('oa_preview_user', JSON.stringify(mockUser));
+    setUser(mockUser);
+    setCurrentPage(Page.Dashboard);
+  };
+
+  const handleLogout = () => {
+    localStorage.setItem('oa_has_logged_out', 'true');
+    localStorage.removeItem('oa_preview_user');
+    localStorage.removeItem('oa_current_page');
+    setUser(null);
+    setCurrentPage(Page.Login);
+  };
 
   const addInAppNotification = (title: string, message: string, type: InAppNotification['type'] = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -51,9 +105,9 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        localStorage.removeItem('oa_has_logged_out');
+        localStorage.removeItem('oa_preview_user');
         setUser(firebaseUser);
-        // Removido o pedido automático de permissão para evitar alertas de spam do navegador
-        // requestNotificationPermission(firebaseUser.uid);
 
         try {
           setupForegroundNotifications();
@@ -70,7 +124,6 @@ const App: React.FC = () => {
           if (!playerDoc.exists()) {
             setCurrentPage(Page.Onboarding);
           } else {
-            // Se já tiver uma página salva, mantém ela, senão vai pro Dashboard
             const saved = localStorage.getItem('oa_current_page');
             if (!saved || saved === Page.Login || saved === Page.Onboarding) {
               setCurrentPage(Page.Dashboard);
@@ -80,9 +133,20 @@ const App: React.FC = () => {
           setCurrentPage(Page.Dashboard);
         }
       } else {
-        setUser(null);
-        setCurrentPage(Page.Login);
-        localStorage.removeItem('oa_current_page');
+        const previewUser = localStorage.getItem('oa_preview_user');
+        const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
+        if (previewUser && !hasLoggedOut) {
+          try {
+            setUser(JSON.parse(previewUser));
+          } catch {
+            setUser(DEFAULT_PREVIEW_USER);
+          }
+        } else if (!hasLoggedOut) {
+          setUser(DEFAULT_PREVIEW_USER);
+        } else {
+          setUser(null);
+          setCurrentPage(Page.Login);
+        }
       }
       setLoading(false);
     });
@@ -135,7 +199,7 @@ const App: React.FC = () => {
       playerList.forEach(p => newState[p.id] = p);
       prevPlayersState.current = newState;
       isInitialPlayersSync = false;
-      setPlayers(playerList);
+      setPlayers(playerList.length > 0 ? playerList : MOCK_PLAYERS);
     });
 
     // Ajustado para garantir que a UI limpe quando não houver partidas
@@ -146,8 +210,8 @@ const App: React.FC = () => {
         setCurrentMatch(matchData);
         currentMatchRef.current = matchData;
       } else {
-        setCurrentMatch(null);
-        currentMatchRef.current = null;
+        setCurrentMatch(CURRENT_MATCH);
+        currentMatchRef.current = CURRENT_MATCH;
       }
     });
 
@@ -199,29 +263,106 @@ const App: React.FC = () => {
   }
 
   const currentPlayer = players.find(p => p.id === user?.uid);
-  const effectiveRole = user?.email === MASTER_ADMIN_EMAIL ? 'admin' : currentPlayer?.role;
+  const isMaster = user?.email === MASTER_ADMIN_EMAIL;
+  const effectiveRole = isMaster ? 'admin' : (currentPlayer?.role || 'player');
+  const isAdmin = effectiveRole === 'admin' || isMaster;
+
+  // Se o aplicativo estiver em Modo de Manutenção (para atletas) ou o Admin estiver pré-visualizando
+  if ((isMaintenance && !isAdmin) || (isAdmin && adminPreviewMaintenance)) {
+    return (
+      <div className="relative">
+        {isAdmin && adminPreviewMaintenance && (
+          <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[200] bg-navy-deep/95 backdrop-blur-md text-white px-4 py-2.5 rounded-2xl shadow-2xl border border-amber-400/80 flex items-center gap-3 animate-pop-in">
+            <div className="flex items-center gap-2 text-xs font-bold">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping"></span>
+              <span className="text-amber-300">MODO PRÉ-VISUALIZAÇÃO:</span>
+              <span className="text-white/90">Esta é exatamente a tela que os atletas comuns veem agora.</span>
+            </div>
+            <button
+              onClick={() => setAdminPreviewMaintenance(false)}
+              className="px-3 py-1.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 rounded-xl font-headline-sm text-xs font-bold active:scale-95 transition-all flex items-center gap-1 shadow-md"
+            >
+              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+              <span>Voltar ao Painel Admin</span>
+            </button>
+          </div>
+        )}
+        <MaintenanceScreen 
+          onCheckAgain={() => {
+            if (adminPreviewMaintenance) {
+              setAdminPreviewMaintenance(false);
+            } else {
+              window.location.reload();
+            }
+          }}
+          onAdminLogin={() => {
+            if (adminPreviewMaintenance) {
+              setAdminPreviewMaintenance(false);
+            } else {
+              handleDirectLogin(DEFAULT_PREVIEW_USER);
+            }
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
-    <Layout currentPage={currentPage} onPageChange={setCurrentPage} currentUserRole={effectiveRole}>
+    <Layout currentPage={currentPage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={user}>
+      {isMaintenance && isAdmin && (
+        <div className="bg-amber-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between z-50 sticky top-0 shadow-md flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] animate-pulse">engineering</span>
+            <span>MODO MANUTENÇÃO ATIVO: Atletas comuns estão bloqueados nesta tela especial.</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setAdminPreviewMaintenance(true)}
+              className="px-2.5 py-1 bg-amber-800 hover:bg-amber-900 text-white rounded-lg font-headline-sm text-xs font-bold active:scale-95 shadow-sm flex items-center gap-1 border border-white/20"
+              title="Veja exatamente a tela que está aparecendo para os atletas"
+            >
+              <span className="material-symbols-outlined text-[16px]">visibility</span>
+              <span>Ver Tela dos Atletas</span>
+            </button>
+            {isMaster && (
+              <button
+                onClick={async () => {
+                  if (confirm("Deseja desativar o modo de manutenção e liberar o app para todos os usuários?")) {
+                    await updateDoc(doc(db, "settings", "system"), { isMaintenance: false });
+                  }
+                }}
+                className="px-2.5 py-1 bg-white text-amber-900 hover:bg-white/90 rounded-lg font-headline-sm text-xs font-bold active:scale-95 shadow-sm"
+              >
+                DESATIVAR
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <NotificationToast 
         notifications={inAppNotifications} 
         onClose={(id) => setInAppNotifications(prev => prev.filter(n => n.id !== id))} 
       />
       <div className="animate-fade-in h-full">
-        {!user && <Login />}
+        {!user && <Login onDirectLogin={handleDirectLogin} />}
         {user && currentPage === Page.Onboarding && <Onboarding user={user} onComplete={() => setCurrentPage(Page.Dashboard)} />}
-        {user && currentPage === Page.Dashboard && <Dashboard match={currentMatch} players={players} user={user} onPageChange={setCurrentPage} />}
+        {user && currentPage === Page.Dashboard && <Dashboard match={currentMatch} players={players} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />}
         {user && currentPage === Page.PlayerList && <PlayerList players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
         {user && currentPage === Page.Ranking && <Ranking players={players} currentUser={user} onPageChange={setCurrentPage} />}
         {user && currentPage === Page.Finance && <Finance players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
         {user && currentPage === Page.CreateMatch && <CreateMatch user={user} onPageChange={setCurrentPage} />}
-        {user && currentPage === Page.TeamBalancing && <TeamBalancing players={players} onPageChange={setCurrentPage} />}
-        {user && currentPage === Page.ArenaPanel && <ArenaPanel user={user} players={players} match={currentMatch} onPageChange={setCurrentPage} />}
+        {user && (currentPage === Page.TeamBalancing || currentPage === Page.ArenaPanel) && (
+          <TeamBalancing players={players} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />
+        )}
         {user && currentPage === Page.Profile && (
           <Profile 
             player={currentPlayer || { id: user.uid, name: user.displayName, email: user.email, photoUrl: user.photoURL, goals: 0, assists: 0, position: 'A definir', status: 'pendente', role: effectiveRole } as Player} 
             currentUserEmail={user?.email} 
+            isMaintenance={isMaintenance}
             onPageChange={setCurrentPage} 
+            onLogout={handleLogout}
+            onPreviewMaintenance={() => setAdminPreviewMaintenance(true)}
           />
         )}
       </div>
