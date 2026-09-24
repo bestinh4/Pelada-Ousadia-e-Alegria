@@ -19,6 +19,7 @@ const TEAM_THEMES = [
   { id: 1, name: 'TIME 2', headerBg: 'bg-red-700', badgeBg: 'bg-red-100 text-red-800', dot: '🔴' },
   { id: 2, name: 'TIME 3', headerBg: 'bg-slate-800', badgeBg: 'bg-slate-100 text-slate-800', dot: '⚽' },
   { id: 3, name: 'TIME 4', headerBg: 'bg-navy-deep', badgeBg: 'bg-blue-100 text-navy-deep', dot: '⚽' },
+  { id: 4, name: 'TIME 5', headerBg: 'bg-emerald-800', badgeBg: 'bg-emerald-100 text-emerald-900', dot: '⭐' },
 ];
 
 const TeamBalancing: React.FC<TeamBalancingProps> = ({ 
@@ -42,6 +43,18 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   const [swapWithPlayerId, setSwapWithPlayerId] = useState<string>('');
   const [isMovingAthlete, setIsMovingAthlete] = useState(false);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
+
+  // Auto-escala por pontualidade (se um time estiver desfalcado e o da fila completar 6 na quadra, entra automaticamente)
+  const [autoPromoteOnArrival, setAutoPromoteOnArrival] = useState<boolean>(() => {
+    const saved = localStorage.getItem('oa_auto_promote_punctuality');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  const toggleAutoPromote = () => {
+    const next = !autoPromoteOnArrival;
+    setAutoPromoteOnArrival(next);
+    localStorage.setItem('oa_auto_promote_punctuality', String(next));
+  };
 
   const isMaster = user?.email === MASTER_ADMIN_EMAIL;
   const isAdm = currentUserRole === 'admin' || isMaster;
@@ -93,12 +106,12 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     const midfielders = selectedPlayers.filter(p => p.position === 'Volante' || p.position === 'Meia' || p.position === 'Meia-atacante').sort(() => Math.random() - 0.5);
     const attackers = selectedPlayers.filter(p => p.position === 'Atacante').sort(() => Math.random() - 0.5);
 
-    const numTeams = 4;
+    const numTeams = 5;
     const teams: Team[] = Array.from({ length: numTeams }, (_, i) => {
-      const theme = TEAM_THEMES[i] || { name: `TIME ${i + 1}`, defaultColor: '' };
+      const theme = TEAM_THEMES[i] || { name: `TIME ${i + 1}` };
       return {
         id: `team_${i + 1}_${Date.now()}`,
-        name: `${theme.name} (${theme.defaultColor})`,
+        name: theme.name,
         playerIds: [],
         hasGoalkeeper: false,
         consecutiveWins: 0,
@@ -109,8 +122,8 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
     const reservePlayerIds: string[] = [];
 
-    // 2. Distribuir exatamente 1 Goleiro para cada time (meta: 4 times = 4 goleiros)
-    for (let i = 0; i < numTeams; i++) {
+    // 2. Distribuir exatamente até 4 Goleiros (1 para cada equipe até o limite de 4 goleiros da pelada)
+    for (let i = 0; i < Math.min(numTeams, 4); i++) {
       if (gks.length > 0) {
         const gk = gks.pop()!;
         teams[i].playerIds.push(gk.id);
@@ -122,34 +135,26 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       reservePlayerIds.push(gks.pop()!.id);
     }
 
-    // 3. Distribuir exatamente 6 Jogadores de Linha para cada time (meta: 4 times x 6 = 24 de linha)
-    const teamFieldCounts = [0, 0, 0, 0];
+    // 3. Distribuir os Jogadores de Linha igualmente entre as 5 equipes (meta: 6 por time = 30 no total)
+    const teamFieldCounts = [0, 0, 0, 0, 0];
     let nextTeamIndex = 0;
 
     const assignFieldPlayer = (p: Player) => {
-      // Verifica se todas as equipes já têm 6 jogadores de linha
-      const openTeamIndices = [0, 1, 2, 3].filter(idx => teamFieldCounts[idx] < 6);
-      if (openTeamIndices.length === 0) {
-        // Todas as 4 equipes já estão completas com 6 de linha (total 24 de linha)
+      // Encontra a menor contagem para distribuir de forma rigorosamente equilibrada entre os 5 times
+      const minCount = Math.min(...teamFieldCounts);
+      // Se todos os 5 times já completaram 6 atletas de linha (30 no total), excedente vira reserva
+      if (minCount >= 6) {
         reservePlayerIds.push(p.id);
         return;
       }
 
-      // Distribui de forma equilibrada/circular
-      let attempts = 0;
-      while (attempts < numTeams) {
-        const targetIdx = (nextTeamIndex + attempts) % numTeams;
-        if (teamFieldCounts[targetIdx] < 6) {
-          teams[targetIdx].playerIds.push(p.id);
-          teamFieldCounts[targetIdx]++;
-          nextTeamIndex = (targetIdx + 1) % numTeams;
-          return;
-        }
-        attempts++;
-      }
+      const eligible = [0, 1, 2, 3, 4].filter(idx => teamFieldCounts[idx] === minCount);
+      let chosenIdx = eligible.find(idx => idx >= nextTeamIndex);
+      if (chosenIdx === undefined) chosenIdx = eligible[0];
 
-      // Caso não caiba
-      reservePlayerIds.push(p.id);
+      teams[chosenIdx].playerIds.push(p.id);
+      teamFieldCounts[chosenIdx]++;
+      nextTeamIndex = (chosenIdx + 1) % numTeams;
     };
 
     // Intercalamos zaga, meio e ataque para garantir equilíbrio tático
@@ -159,12 +164,12 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       if (attackers.length > 0) assignFieldPlayer(attackers.pop()!);
     }
 
-    // Atualizar status de cada time
+    // Atualizar status de cada time (são 5 equipes e 4 goleiros, o 5º time terá goleiro rotativo/emprestado)
     teams.forEach(t => {
       const teamGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
       const teamField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
       t.hasGoalkeeper = teamGKs.length > 0;
-      t.isIncomplete = teamField.length < 6 || teamGKs.length < 1;
+      t.isIncomplete = teamField.length < 6;
     });
 
     const newSession: MatchSession = {
@@ -192,13 +197,13 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       // Notificar todos os participantes
       try {
         await broadcastNotification(
-          "⚽ EQUIPES SORTEADAS!",
-          "A Diretoria realizou o sorteio oficial das equipes (1 Goleiro + 6 de Linha em cada time)! Veja a escalação no App.",
+          "⚽ 5 EQUIPES SORTEADAS!",
+          "A Diretoria realizou o sorteio oficial das 5 equipes com 4 goleiros distribuídos! Veja a escalação no App.",
           user?.uid
         );
       } catch {}
 
-      alert("Sorteio oficial realizado com sucesso: 1 Goleiro e 6 de Linha por time!");
+      alert("Sorteio oficial realizado com sucesso: 5 equipes e 4 goleiros oficiais!");
     } catch (e) {
       console.error(e);
       alert("Erro ao salvar o sorteio.");
@@ -207,16 +212,301 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     }
   };
 
-  // Alternar presença física na quadra (Check-in)
+  // Helper para obter estatísticas de presença física na quadra por equipe
+  const getTeamPresence = (team: Team, customPresence?: Record<string, boolean>) => {
+    const presenceMap = customPresence || session?.courtPresence || {};
+    const lines = team.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
+    const gks = team.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
+    const presentLines = lines.filter(pid => !!presenceMap[pid]).length;
+    const presentGKs = gks.filter(pid => !!presenceMap[pid]).length;
+    // Time está pronto na quadra se possui 6 atletas de linha presentes (ou todos se tiver menos de 6)
+    const isReady = lines.length > 0 && presentLines >= Math.min(lines.length, 6);
+    return {
+      lines,
+      gks,
+      presentLines,
+      presentGKs,
+      isReady,
+      presentTotal: presentLines + presentGKs,
+      total: team.playerIds.length,
+      missingLines: lines.filter(pid => !presenceMap[pid])
+    };
+  };
+
+  // Alternar presença física na quadra (Check-in) com auto-substituição por pontualidade
   const handleToggleCourtPresence = async (playerId: string) => {
     if (!session) return;
     const currentStatus = !!session.courtPresence?.[playerId];
+    const newPresence = {
+      ...(session.courtPresence || {}),
+      [playerId]: !currentStatus
+    };
+
     try {
-      await updateDoc(doc(db, "sessions", "current"), {
+      const updates: any = {
         [`courtPresence.${playerId}`]: !currentStatus
-      });
+      };
+
+      // Se a pelada AINDA NÃO COMEÇOU, a auto-promoção por pontualidade estiver ligada e um atleta estiver CHEGANDO (!currentStatus)
+      const isPeladaStarted = session.status === 'active' || !!session.activeMatch?.startedAt;
+      if (!isPeladaStarted && autoPromoteOnArrival && !currentStatus) {
+        // Encontrar a equipe deste atleta
+        const playerTeam = session.teams.find(t => t.playerIds.includes(playerId));
+        if (playerTeam) {
+          const stats = getTeamPresence(playerTeam, newPresence);
+
+          const curAId = session.activeMatch?.teamAId || session.teams[0]?.id;
+          const curBId = session.activeMatch?.teamBId || session.teams[1]?.id;
+
+          // Se o time completou os 6 atletas e NÃO está no confronto inicial (está na fila de espera)
+          if (stats.isReady && playerTeam.id !== curAId && playerTeam.id !== curBId) {
+            const teamA = session.teams.find(t => t.id === curAId);
+            const teamB = session.teams.find(t => t.id === curBId);
+
+            const statsA = teamA ? getTeamPresence(teamA, newPresence) : null;
+            const statsB = teamB ? getTeamPresence(teamB, newPresence) : null;
+
+            // Se o Time A estiver incompleto, substitui A. Se o Time B estiver incompleto, substitui B.
+            let replaceTeamId: string | null = null;
+            if (statsA && !statsA.isReady) {
+              replaceTeamId = curAId;
+            } else if (statsB && !statsB.isReady) {
+              replaceTeamId = curBId;
+            }
+
+            if (replaceTeamId) {
+              const isReplacingA = replaceTeamId === curAId;
+              updates.activeMatch = {
+                ...(session.activeMatch || { scoreA: 0, scoreB: 0, startedAt: null }),
+                teamAId: isReplacingA ? playerTeam.id : curAId,
+                teamBId: !isReplacingA ? playerTeam.id : curBId
+              };
+              const currentQ = session.waitingQueue || session.teams.slice(2).map(t => t.id);
+              const filteredQ = currentQ.filter(id => id !== playerTeam.id);
+              updates.waitingQueue = [replaceTeamId, ...filteredQ.filter(id => id !== replaceTeamId)];
+              playSound('cheer');
+            }
+          }
+        }
+      }
+
+      await updateDoc(doc(db, "sessions", "current"), updates);
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // Troca direta / promoção de equipe para o confronto
+  const handlePromoteTeamToMatch = async (teamToPromoteId: string, teamToReplaceId: string) => {
+    if (!session || !isAdm) return;
+    try {
+      const curAId = session.activeMatch?.teamAId || session.teams[0]?.id;
+      const isReplacingA = curAId === teamToReplaceId;
+      const curBId = session.activeMatch?.teamBId || session.teams[1]?.id;
+
+      const newActiveMatch = {
+        ...(session.activeMatch || { scoreA: 0, scoreB: 0, startedAt: null }),
+        teamAId: isReplacingA ? teamToPromoteId : curAId,
+        teamBId: !isReplacingA ? teamToPromoteId : curBId
+      };
+
+      const currentQ = session.waitingQueue || session.teams.slice(2).map(t => t.id);
+      const filteredQ = currentQ.filter(id => id !== teamToPromoteId);
+      const newQueue = [teamToReplaceId, ...filteredQ.filter(id => id !== teamToReplaceId)];
+
+      await updateDoc(doc(db, "sessions", "current"), {
+        activeMatch: newActiveMatch,
+        waitingQueue: newQueue
+      });
+      playSound('cheer');
+    } catch (e) {
+      alert("Erro ao alterar equipes do confronto.");
+    }
+  };
+
+  // Finalizar partida e avançar fila (Regra Oficial: se empate, saem as duas equipes; exceto se houver apenas 3 equipes, que vai para os pênaltis)
+  const handleFinishMatchAndRotate = async (result: 'teamA' | 'teamB' | 'draw') => {
+    if (!session || !isAdm) return;
+    const curAId = session.activeMatch?.teamAId || session.teams[0]?.id;
+    const curBId = session.activeMatch?.teamBId || session.teams[1]?.id;
+    const teamA = session.teams.find(t => t.id === curAId);
+    const teamB = session.teams.find(t => t.id === curBId);
+    const queue = [...(session.waitingQueue || session.teams.slice(2).map(t => t.id))];
+
+    if (!teamA || !teamB) return;
+
+    // CASO 1: EMPATE
+    if (result === 'draw') {
+      // Exceção: Se houver apenas 3 equipes na pelada, vai para os pênaltis!
+      if (session.teams.length === 3) {
+        const penaltyWinner = confirm(
+          `⚽ DISPUTA DE PÊNALTIS (3 EQUIPES):\n\n` +
+          `O jogo terminou empatado. De acordo com o regulamento com 3 equipes, a decisão é nos PÊNALTIS!\n\n` +
+          `Clique em [OK] se o "${teamA.name}" venceu nos pênaltis.\n` +
+          `Clique em [Cancelar] se o "${teamB.name}" venceu nos pênaltis.`
+        );
+
+        const penaltyWinnerId = penaltyWinner ? curAId : curBId;
+        const penaltyLoserId = penaltyWinner ? curBId : curAId;
+
+        if (queue.length === 0) return alert("Não há equipes na fila de espera.");
+        const nextTeamId = queue.shift()!;
+        queue.push(penaltyLoserId);
+
+        const newTeams = session.teams.map(t => {
+          if (t.id === penaltyWinnerId) {
+            return {
+              ...t,
+              totalWins: (t.totalWins || 0) + 1,
+              consecutiveWins: (t.consecutiveWins || 0) + 1
+            };
+          }
+          if (t.id === penaltyLoserId) {
+            return { ...t, consecutiveWins: 0 };
+          }
+          return t;
+        });
+
+        try {
+          await updateDoc(doc(db, "sessions", "current"), {
+            teams: newTeams,
+            activeMatch: {
+              teamAId: penaltyWinnerId,
+              teamBId: nextTeamId,
+              scoreA: 0,
+              scoreB: 0,
+              startedAt: Date.now()
+            },
+            waitingQueue: queue
+          });
+          playSound('cheer');
+          alert(`Disputa de pênaltis concluída! ${penaltyWinner ? teamA.name : teamB.name} permanece em campo e ${session.teams.find(t => t.id === nextTeamId)?.name} entra para o próximo jogo.`);
+        } catch (e) {
+          alert("Erro ao salvar decisão de pênaltis.");
+        }
+        return;
+      }
+
+      // Regra Oficial (4 ou 5 equipes): EM CASO DE EMPATE, AS DUAS EQUIPES SAEM DE CAMPO!
+      if (queue.length < 2) {
+        alert("Fila de espera insuficiente para substituir ambas as equipes.");
+        return;
+      }
+
+      // Ambos os times saem de campo e vão para o fim da fila de espera
+      queue.push(curAId);
+      queue.push(curBId);
+
+      // Os dois próximos times da fila entram em campo
+      const nextTeamAId = queue.shift()!;
+      const nextTeamBId = queue.shift()!;
+
+      const nextTeamA = session.teams.find(t => t.id === nextTeamAId);
+      const nextTeamB = session.teams.find(t => t.id === nextTeamBId);
+
+      // Zera vitórias consecutivas dos dois que saíram
+      const newTeams = session.teams.map(t => {
+        if (t.id === curAId || t.id === curBId) {
+          return { ...t, consecutiveWins: 0 };
+        }
+        return t;
+      });
+
+      try {
+        await updateDoc(doc(db, "sessions", "current"), {
+          teams: newTeams,
+          activeMatch: {
+            teamAId: nextTeamAId,
+            teamBId: nextTeamBId,
+            scoreA: 0,
+            scoreB: 0,
+            startedAt: Date.now()
+          },
+          matchCount: (session.matchCount || 1) + 1,
+          waitingQueue: queue
+        });
+
+        playSound('cheer');
+        alert(`Empate registrado! Pelo regulamento, ${teamA.name} e ${teamB.name} saíram de campo e foram para o fim da fila.\n\nPróximo confronto: ${nextTeamA?.name} 🆚 ${nextTeamB?.name}!`);
+      } catch (e) {
+        alert("Erro ao registrar empate.");
+      }
+      return;
+    }
+
+    // CASO 2: VITÓRIA DE UMA DAS EQUIPES (teamA ou teamB)
+    if (queue.length === 0) return alert("Não há equipes na fila de espera.");
+
+    const nextTeamId = queue.shift()!;
+    const stayingTeamId = result === 'teamA' ? curAId : curBId;
+    const leavingTeamId = result === 'teamA' ? curBId : curAId;
+
+    queue.push(leavingTeamId);
+
+    const newTeams = session.teams.map(t => {
+      if (t.id === stayingTeamId) {
+        return { 
+          ...t, 
+          totalWins: (t.totalWins || 0) + 1, 
+          consecutiveWins: (t.consecutiveWins || 0) + 1 
+        };
+      }
+      if (t.id === leavingTeamId) {
+        return { ...t, consecutiveWins: 0 };
+      }
+      return t;
+    });
+
+    try {
+      await updateDoc(doc(db, "sessions", "current"), {
+        teams: newTeams,
+        activeMatch: {
+          teamAId: stayingTeamId,
+          teamBId: nextTeamId,
+          scoreA: 0,
+          scoreB: 0,
+          startedAt: Date.now()
+        },
+        matchCount: (session.matchCount || 1) + 1,
+        waitingQueue: queue
+      });
+      playSound('cheer');
+      alert(`Vitória confirmada! ${result === 'teamA' ? teamA.name : teamB.name} continua na quadra e ${session.teams.find(t => t.id === nextTeamId)?.name} entrou como desafiante.`);
+    } catch (e) {
+      alert("Erro ao avançar partida.");
+    }
+  };
+
+  // Iniciar oficialmente a pelada (Apito Inicial)
+  const handleStartPelada = async () => {
+    if (!session || !isAdm) return;
+    try {
+      await updateDoc(doc(db, "sessions", "current"), {
+        status: "active",
+        peladaStartedAt: Date.now(),
+        "activeMatch.startedAt": Date.now(),
+        matchCount: 1
+      });
+      playSound('cheer');
+      alert("⚽ A PELADA COMEÇOU! Apito inicial dado.\n\nA regra de pontualidade foi desativada e a partir de agora o rodízio segue rigorosamente os resultados dos jogos.");
+    } catch (e) {
+      alert("Erro ao iniciar a pelada.");
+    }
+  };
+
+  // Voltar para status de pré-pelada (caso iniciado por engano)
+  const handleResetPeladaStatus = async () => {
+    if (!session || !isAdm) return;
+    if (!confirm("Deseja voltar a pelada para o status 'Aguardando Início'? (Isso reabilitará a checagem de pontualidade)")) return;
+    try {
+      await updateDoc(doc(db, "sessions", "current"), {
+        status: "waiting",
+        "activeMatch.startedAt": null,
+        peladaStartedAt: null
+      });
+      playSound('cheer');
+    } catch (e) {
+      alert("Erro ao redefinir status da pelada.");
     }
   };
 
@@ -259,7 +549,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         const teamGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
         const teamField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
         t.hasGoalkeeper = teamGKs.length > 0;
-        t.isIncomplete = teamField.length < 6 || teamGKs.length < 1;
+        t.isIncomplete = teamField.length < 6;
       });
 
       await updateDoc(doc(db, "sessions", "current"), { teams: updatedTeams });
@@ -288,7 +578,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         const teamGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
         const teamField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
         t.hasGoalkeeper = teamGKs.length > 0;
-        t.isIncomplete = teamField.length < 6 || teamGKs.length < 1;
+        t.isIncomplete = teamField.length < 6;
       });
 
       await updateDoc(doc(db, "sessions", "current"), { 
@@ -334,7 +624,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         const tGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
         const tField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
         t.hasGoalkeeper = tGKs.length > 0;
-        t.isIncomplete = tField.length < 6 || tGKs.length < 1;
+        t.isIncomplete = tField.length < 6;
       });
 
       await updateDoc(doc(db, "sessions", "current"), { 
@@ -433,10 +723,11 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   const handleShareToWhatsApp = () => {
     if (!session || session.teams.length === 0) return;
 
-    let text = `⚽ *ESCALAÇÃO OFICIAL DAS EQUIPES • O&A* 🇭🇷\n`;
-    text += `_Regra Oficial: 1 Goleiro + 6 Jogadores de Linha por Time_\n\n`;
+    let text = `⚽ *ESCALAÇÃO OFICIAL DAS 5 EQUIPES • O&A* 🇭🇷\n`;
+    text += `_Regra Oficial: 5 Equipes • 30 Atletas de Linha (6 por Time) e 4 Goleiros_\n\n`;
     text += `📌 *PARTIDA 1 (Abertura):* ${session.teams[0]?.name || 'Time 1'} 🆚 ${session.teams[1]?.name || 'Time 2'}\n`;
-    text += `⏳ *Na Espera:* ${session.teams[2]?.name || 'Time 3'} e ${session.teams[3]?.name || 'Time 4'}\n`;
+    const waitingTeams = session.teams.slice(2).map(t => t.name).join(', ');
+    text += `⏳ *Na Espera:* ${waitingTeams || 'Nenhum'}\n`;
     text += `⚠️ *Regra de Pontualidade:* Caso um time da partida 1 esteja desfalcado na quadra, o próximo assume imediatamente!\n\n`;
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
 
@@ -451,8 +742,9 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         .filter(p => p && p.position !== 'Goleiro')
         .map(p => p?.name);
 
-      text += `*${team.name.toUpperCase()}* (${team.playerIds.length}/7 Atletas)\n`;
-      text += `🧤 *Goleiro (1):* ${gks.length > 0 ? gks.join(', ') : 'A definir'}\n`;
+      const hasGK = gks.length > 0;
+      text += `*${team.name.toUpperCase()}* (${team.playerIds.length} Atletas)\n`;
+      text += `🧤 *Goleiro:* ${hasGK ? gks.join(', ') : 'GK Rotativo (revezamento)'}\n`;
       text += `🏃 *Linha (${lines.length}/6):* ${lines.length > 0 ? lines.join(', ') : 'A definir'}\n\n`;
     });
 
@@ -509,7 +801,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                   </span>
                 </div>
                 <span className="font-body-sm text-body-sm text-outline truncate">
-                  Padrão Oficial: 1 Goleiro e 6 Jogadores de Linha em cada time (7 por equipe)
+                  Padrão Oficial: 5 Equipes • 30 Atletas de Linha (6 por equipe) e 4 Goleiros
                 </span>
               </div>
             </div>
@@ -521,7 +813,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                 </span>
               )}
               <span className="bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">
-                4 TIMES • 28 ATLETAS
+                5 EQUIPES • 30 LINHA • 4 GK
               </span>
             </div>
           </div>
@@ -555,10 +847,10 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
               </div>
               <div className="text-center px-4">
                 <h3 className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                  SORTEANDO OS 4 ESQUADRÕES...
+                  SORTEANDO AS 5 EQUIPES OFICIAIS...
                 </h3>
                 <p className="font-body-sm text-body-sm text-outline mt-1 max-w-sm">
-                  Distribuindo exatamente 1 goleiro e 6 jogadores de linha em cada equipe
+                  Distribuindo 30 atletas de linha (6 por equipe) e os 4 goleiros oficiais
                 </p>
               </div>
             </motion.div>
@@ -582,29 +874,29 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                       {selectedIds.size} ATLETAS PRONTOS
                     </h3>
                     <p className="font-body-sm text-body-sm text-outline mt-2 leading-relaxed">
-                      Cada equipe é formada estritamente por <strong>1 goleiro</strong> e <strong>6 jogadores de linha</strong> (total 7 atletas por time).
+                      São <strong>5 equipes</strong> formadas por <strong>6 atletas de linha cada (30 no total)</strong> e <strong>4 goleiros oficiais</strong> com rodízio na 5ª equipe.
                     </p>
                   </div>
 
                   {/* Resumo técnico das posições */}
                   <div className="grid grid-cols-2 gap-2 bg-surface-container-low p-3 rounded-xl border border-surface-container-high/40">
                     <div className="flex flex-col">
-                      <span className="text-[11px] text-outline font-medium">Goleiros Titulares:</span>
+                      <span className="text-[11px] text-outline font-medium">Goleiros Oficiais:</span>
                       <span className="font-headline-sm text-sm text-primary-container font-bold">
                         🧤 {confirmedPlayers.filter(p => p.position === 'Goleiro').length}/4 (1 por time)
                       </span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-[11px] text-outline font-medium">Jogadores de Linha:</span>
+                      <span className="text-[11px] text-outline font-medium">Atletas de Linha:</span>
                       <span className="font-headline-sm text-sm text-navy-deep font-bold">
-                        🏃 {confirmedPlayers.filter(p => p.position !== 'Goleiro').length}/24 (6 por time)
+                        🏃 {confirmedPlayers.filter(p => p.position !== 'Goleiro').length}/30 (6 por time)
                       </span>
                     </div>
                   </div>
 
                   <div className="p-2.5 rounded-xl bg-primary-fixed/20 border border-primary-container/20 text-[11px] text-primary-container font-medium flex items-center gap-2">
                     <span className="material-symbols-outlined text-[18px] shrink-0">info</span>
-                    <span>Total da convocação titular: <strong>28 atletas</strong> (4 goleiros + 24 de linha).</span>
+                    <span>Total da convocação titular: <strong>34 atletas</strong> (30 atletas de linha + 4 goleiros).</span>
                   </div>
 
                   {isAdm ? (
@@ -614,7 +906,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                       className="w-full py-4 px-4 bg-gradient-to-r from-primary-container via-primary-bright to-navy-deep text-on-primary rounded-xl font-headline-sm text-headline-sm font-bold flex items-center justify-center gap-2.5 shadow-md shadow-primary/25 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <span className="material-symbols-outlined text-[22px]">shuffle</span>
-                      <span>SORTEAR OS 4 TIMES (1 GK + 6 LINHA)</span>
+                      <span>SORTEAR AS 5 EQUIPES (30 NA LINHA • 4 GK)</span>
                     </button>
                   ) : (
                     <div className="p-3.5 bg-surface-container-low rounded-xl text-center text-xs text-outline font-body-sm border border-surface-container-high/40">
@@ -750,44 +1042,310 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                 )}
               </div>
 
-              {/* TABELA DE JOGOS & REGRAS OFICIAIS */}
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-navy-deep via-primary-container to-blue-900 text-white shadow-md flex flex-col gap-2.5">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-amber-400 text-[22px]">sports_score</span>
-                    <span className="font-headline-sm text-sm font-bold uppercase tracking-wider">
-                      Ordem dos Jogos • Convocação Oficial (1 GK + 6 Linha)
-                    </span>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded-full bg-white/20 text-white font-label-md text-xs font-bold">
-                    4 Equipes Escaladas
-                  </span>
-                </div>
+              {/* PAINEL DE CONTROLE DO JOGO 1 & FILA DE ESPERA (TEMPO REAL) */}
+              {(() => {
+                const curAId = session?.activeMatch?.teamAId || session?.teams[0]?.id;
+                const curBId = session?.activeMatch?.teamBId || session?.teams[1]?.id;
+                const teamA = session?.teams.find(t => t.id === curAId) || session?.teams[0];
+                const teamB = session?.teams.find(t => t.id === curBId) || session?.teams[1];
 
-                {/* Destaque do Jogo 1 */}
-                <div className="p-3 bg-white/10 rounded-xl flex items-center justify-between flex-wrap gap-2 text-xs">
-                  <div className="flex items-center gap-2 font-bold">
-                    <span className="text-amber-300">JOGO 1:</span>
-                    <span>{session.teams[0]?.name || 'Time 1'} 🆚 {session.teams[1]?.name || 'Time 2'}</span>
-                  </div>
-                  <div className="text-white/80 font-medium">
-                    Na espera: {session.teams[2]?.name || 'Time 3'} e {session.teams[3]?.name || 'Time 4'}
-                  </div>
-                </div>
+                const statsA = teamA ? getTeamPresence(teamA) : null;
+                const statsB = teamB ? getTeamPresence(teamB) : null;
 
-                <p className="text-xs text-white/90 leading-relaxed">
-                  ⚖️ <strong>Regra Oficial:</strong> Se o Time 1 ou Time 2 estiver com desfalque na quadra no momento do apito inicial, cederá a vez ao <strong>Time 3</strong> para manter a pontualidade da pelada.
-                </p>
-              </div>
+                const isPeladaStarted = session?.status === 'active' || !!session?.activeMatch?.startedAt;
 
-              {/* GRID DOS 4 CARDS DE EQUIPES (6 DE LINHA + 1 GOLEIRO) */}
+                const currentQ = session?.waitingQueue || session?.teams.slice(2).map(t => t.id) || [];
+                const queueTeams = currentQ
+                  .map(tId => session?.teams.find(t => t.id === tId))
+                  .filter(Boolean) as Team[];
+                const finalQueue = queueTeams.length > 0 
+                  ? queueTeams 
+                  : (session?.teams || []).filter(t => t.id !== curAId && t.id !== curBId);
+
+                // A regra de pontualidade é verificada APENAS ANTES da pelada começar
+                const readyQueueTeam = !isPeladaStarted ? finalQueue.find(t => getTeamPresence(t).isReady) : null;
+                const incompleteTeam = !isPeladaStarted ? ((statsA && !statsA.isReady) ? teamA : (statsB && !statsB.isReady) ? teamB : null) : null;
+                const incompleteStats = incompleteTeam ? getTeamPresence(incompleteTeam) : null;
+
+                return (
+                  <div className="flex flex-col gap-3">
+                    {/* Alerta de Pontualidade / Troca Inteligente (APENAS ANTES DE COMEÇAR) */}
+                    {!isPeladaStarted && readyQueueTeam && incompleteTeam && (
+                      <div className="p-3.5 rounded-2xl bg-amber-500/15 border-2 border-amber-500/40 text-amber-950 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse-slow">
+                        <div className="flex items-center gap-2.5">
+                          <span className="material-symbols-outlined text-amber-700 text-[24px] shrink-0">emergency</span>
+                          <div className="text-xs">
+                            <strong className="text-amber-900 block text-sm">
+                              ⚡ Regra de Pontualidade Acionada (Pré-Pelada)!
+                            </strong>
+                            <span>
+                              O <strong>{readyQueueTeam.name}</strong> já está com <strong>6/6 atletas prontos na quadra</strong>, enquanto o <strong>{incompleteTeam.name}</strong> ainda está com desfalque ({incompleteStats?.presentLines}/6 presentes).
+                            </span>
+                          </div>
+                        </div>
+
+                        {isAdm && (
+                          <button
+                            onClick={() => handlePromoteTeamToMatch(readyQueueTeam.id, incompleteTeam.id)}
+                            className="py-2 px-3.5 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 text-white rounded-xl font-headline-sm text-xs font-bold shadow-md active:scale-95 transition-all whitespace-nowrap flex items-center justify-center gap-1.5"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+                            <span>Colocar {readyQueueTeam.name} no Jogo 1</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* CARD PRINCIPAL: CONFRONTO JOGO 1 & RODÍZIO */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-navy-deep via-primary-container to-blue-950 text-white shadow-xl flex flex-col gap-4">
+                      {/* Header do Painel */}
+                      <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-white/15">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-amber-400">
+                            <span className="material-symbols-outlined text-[24px]">sports_score</span>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              {isPeladaStarted ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-400/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border border-emerald-400/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                                  ROLANDO A BOLA • JOGO #{session?.matchCount || 1}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-amber-300 font-bold uppercase tracking-widest block">
+                                  PRÉ-PELADA • CHECAGEM DE PONTUALIDADE
+                                </span>
+                              )}
+                            </div>
+                            <h3 className="font-headline-sm text-base sm:text-lg font-bold leading-tight mt-0.5">
+                              {isPeladaStarted 
+                                ? `Partida em Andamento: ${teamA?.name || 'Time A'} 🆚 ${teamB?.name || 'Time B'}` 
+                                : 'Confronto de Abertura & Rodízio Oficial'}
+                            </h3>
+                          </div>
+                        </div>
+
+                        {/* Botão de Toggle da Auto-Escalação por Pontualidade (SOMENTE ANTES DE COMEÇAR A PELADA) */}
+                        {!isPeladaStarted && isAdm && (
+                          <button
+                            onClick={toggleAutoPromote}
+                            className={`py-1.5 px-3 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border ${
+                              autoPromoteOnArrival 
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 hover:bg-emerald-500/30' 
+                                : 'bg-white/10 text-white/80 border-white/20 hover:bg-white/20'
+                            }`}
+                            title="Antes de começar a pelada: se um time de abertura estiver incompleto e o da fila atingir 6 na quadra, a substituição é automática!"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">
+                              {autoPromoteOnArrival ? 'bolt' : 'toggle_off'}
+                            </span>
+                            <span>Auto-Pontualidade: {autoPromoteOnArrival ? 'LIGADO' : 'MANUAL'}</span>
+                          </button>
+                        )}
+
+                        {/* Indicador de Pelada Iniciada */}
+                        {isPeladaStarted && (
+                          <div className="flex items-center gap-2">
+                            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-400/30 flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[15px]">timer</span>
+                              <span>Pelada Iniciada</span>
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* PLACAR E DUELO: TIME A 🆚 TIME B */}
+                      <div className="grid grid-cols-1 sm:grid-cols-11 items-center gap-3 bg-white/10 p-4 rounded-xl border border-white/10">
+                        {/* Time A */}
+                        <div className="sm:col-span-5 flex flex-col gap-1.5 bg-black/20 p-3 rounded-xl border border-white/10">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs uppercase font-bold text-amber-300">
+                              {isPeladaStarted ? 'EM CAMPO (TIME A)' : 'TIME A (ABERTURA)'}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              statsA?.isReady ? 'bg-emerald-400 text-emerald-950 font-bold' : 'bg-amber-400 text-amber-950 font-bold'
+                            }`}>
+                              {statsA?.isReady ? '🟢 6/6 NA QUADRA' : `⚠️ ${statsA?.presentLines || 0}/6 NA QUADRA`}
+                            </span>
+                          </div>
+                          <h4 className="font-headline-sm text-lg sm:text-xl font-bold truncate">
+                            {teamA?.name || 'Time 1'}
+                          </h4>
+                          <span className="text-[11px] text-white/70">
+                            {statsA?.presentTotal || 0} de {statsA?.total || 7} atletas confirmados na quadra
+                          </span>
+                        </div>
+
+                        {/* VS Central */}
+                        <div className="sm:col-span-1 flex flex-col items-center justify-center text-center">
+                          <span className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs text-amber-300 shadow-inner">
+                            VS
+                          </span>
+                        </div>
+
+                        {/* Time B */}
+                        <div className="sm:col-span-5 flex flex-col gap-1.5 bg-black/20 p-3 rounded-xl border border-white/10">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs uppercase font-bold text-amber-300">
+                              {isPeladaStarted ? 'EM CAMPO (TIME B)' : 'TIME B (ABERTURA)'}
+                            </span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              statsB?.isReady ? 'bg-emerald-400 text-emerald-950 font-bold' : 'bg-amber-400 text-amber-950 font-bold'
+                            }`}>
+                              {statsB?.isReady ? '🟢 6/6 NA QUADRA' : `⚠️ ${statsB?.presentLines || 0}/6 NA QUADRA`}
+                            </span>
+                          </div>
+                          <h4 className="font-headline-sm text-lg sm:text-xl font-bold truncate">
+                            {teamB?.name || 'Time 2'}
+                          </h4>
+                          <span className="text-[11px] text-white/70">
+                            {statsB?.presentTotal || 0} de {statsB?.total || 7} atletas confirmados na quadra
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* ÁREA DE CONTROLES: ANTES DE INICIAR VS PELADA EM ANDAMENTO */}
+                      {!isPeladaStarted ? (
+                        /* FASE PRÉ-PELADA: BOTÃO OFICIAL DE INICIAR A PELADA */
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/15 bg-white/5 -mx-4 sm:-mx-5 -mb-4 sm:-mb-5 p-4 rounded-b-2xl">
+                          <div className="flex items-center gap-2.5">
+                            <span className="material-symbols-outlined text-amber-300 text-[24px]">sports</span>
+                            <div className="text-xs">
+                              <span className="font-bold text-white block text-sm">Aguardando Apito Inicial</span>
+                              <span className="text-white/75">
+                                Confirme a presença dos atletas na quadra. Quando estiver pronto, dê o apito inicial para começar o rodízio.
+                              </span>
+                            </div>
+                          </div>
+
+                          {isAdm && (
+                            <button
+                              onClick={handleStartPelada}
+                              className="py-3 px-5 bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-700 hover:from-emerald-600 hover:to-teal-800 text-white rounded-xl font-headline-sm text-sm font-bold shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 active:scale-95 transition-all animate-bounce-slow"
+                            >
+                              <span className="material-symbols-outlined text-[20px]">sports_soccer</span>
+                              <span>INICIAR PELADA (APITO INICIAL)</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        /* FASE PELADA EM ANDAMENTO: AÇÕES DE RODÍZIO OFICIAL */
+                        isAdm && (
+                          <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-white/10">
+                            <div className="flex flex-col">
+                              <span className="text-xs text-white/95 font-bold flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                                Finalizar Confronto & Rodar Fila:
+                              </span>
+                              <span className="text-[11px] text-white/70">
+                                {session.teams.length === 3 
+                                  ? '⚖️ Regra 3 Equipes: Em caso de empate, a decisão é nos pênaltis' 
+                                  : '⚖️ Regra Oficial: Em caso de empate, ambos saem de campo e entram os 2 da fila'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <button
+                                onClick={() => handleFinishMatchAndRotate('teamA')}
+                                className="py-2 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold active:scale-95 transition-all shadow-xs"
+                                title={`${teamA?.name} venceu (permanece em campo e próximo da fila entra)`}
+                              >
+                                Vitória {teamA?.name}
+                              </button>
+                              <button
+                                onClick={() => handleFinishMatchAndRotate('draw')}
+                                className="py-2 px-3.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold active:scale-95 transition-all shadow-xs flex items-center gap-1"
+                                title={session.teams.length === 3 ? "Empate (Decisão nos pênaltis)" : "Empate (As duas equipes saem de campo e entram duas da fila)"}
+                              >
+                                <span className="material-symbols-outlined text-[15px]">handshake</span>
+                                <span>{session.teams.length === 3 ? 'Empate (Pênaltis)' : 'Empate (Saem os Dois)'}</span>
+                              </button>
+                              <button
+                                onClick={() => handleFinishMatchAndRotate('teamB')}
+                                className="py-2 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold active:scale-95 transition-all shadow-xs"
+                                title={`${teamB?.name} venceu (permanece em campo e próximo da fila entra)`}
+                              >
+                                Vitória {teamB?.name}
+                              </button>
+
+                              <button
+                                onClick={handleResetPeladaStatus}
+                                className="py-1 px-2 text-[10px] text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-all ml-1"
+                                title="Voltar a pelada para status de pré-jogo (caso tenha iniciado por engano)"
+                              >
+                                Voltar Pré-Jogo
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      )}
+
+                      {/* FILA DE ESPERA ORDENADA DOS PRÓXIMOS TIMES */}
+                      <div className="flex flex-col gap-2 pt-2 border-t border-white/10">
+                        <div className="flex items-center justify-between text-xs text-white/90">
+                          <span className="font-bold flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-[16px] text-amber-400">hourglass_top</span>
+                            Fila de Espera Oficial (Próximos a Entrar):
+                          </span>
+                          <span className="text-[11px] opacity-75">
+                            Conforme os atletas chegam, o status atualiza em tempo real
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {finalQueue.map((qTeam, qIdx) => {
+                            const qStats = getTeamPresence(qTeam);
+                            return (
+                              <div 
+                                key={qTeam.id || qIdx} 
+                                className="bg-black/25 p-2.5 rounded-xl border border-white/10 flex flex-col justify-between gap-1.5"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-amber-300 uppercase">
+                                    #{qIdx + 1} DA FILA
+                                  </span>
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                                    qStats.isReady ? 'bg-emerald-400 text-emerald-950' : 'bg-white/20 text-white'
+                                  }`}>
+                                    {qStats.isReady ? '6/6 PRONTO' : `${qStats.presentLines}/6 na quadra`}
+                                  </span>
+                                </div>
+
+                                <span className="font-headline-sm text-sm font-bold truncate">
+                                  {qTeam.name}
+                                </span>
+
+                                {isAdm && (
+                                  <button
+                                    onClick={() => handlePromoteTeamToMatch(qTeam.id, statsA?.isReady ? curBId : curAId)}
+                                    className="w-full mt-1 py-1 px-2 rounded-lg bg-white/15 hover:bg-white/25 text-[11px] font-bold text-white transition-all flex items-center justify-center gap-1 active:scale-95"
+                                  >
+                                    <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
+                                    <span>Escalar no Jogo 1</span>
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* GRID DOS CARDS DE EQUIPES (5 TIMES) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
                 {session.teams.map((team, idx) => {
                   const theme = TEAM_THEMES[idx] || { name: `TIME ${idx + 1}`, headerBg: 'bg-navy-deep', dot: '⚽' };
                   const gks = team.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
                   const lines = team.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
-                  const hasGK = gks.length === 1;
-                  const isComplete = gks.length === 1 && lines.length === 6;
+                  const hasGK = gks.length >= 1;
+                  const teamPresence = getTeamPresence(team);
+
+                  const curAId = session?.activeMatch?.teamAId || session?.teams[0]?.id;
+                  const curBId = session?.activeMatch?.teamBId || session?.teams[1]?.id;
+                  const isPlayingMatch = team.id === curAId || team.id === curBId;
+                  const queuePos = (session?.waitingQueue || []).indexOf(team.id);
 
                   return (
                     <div 
@@ -803,21 +1361,32 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                               {team.name}
                             </h4>
                             <span className="text-[11px] opacity-90 font-medium">
-                              {lines.length}/6 Linha • {gks.length}/1 Goleiro (Total: {team.playerIds.length}/7)
+                              {lines.length}/6 Linha • {hasGK ? `${gks.length} Goleiro` : 'GK Rotativo'} (Total: {team.playerIds.length})
                             </span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                          {isPlayingMatch ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-400 text-emerald-950 shadow-xs">
+                              ⚽ JOGO 1
+                            </span>
+                          ) : queuePos >= 0 ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/20 text-white">
+                              ⏳ #{queuePos + 1} NA FILA
+                            </span>
+                          ) : null}
+
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            hasGK ? 'bg-white/20 text-white' : 'bg-amber-400 text-amber-950'
+                            teamPresence.isReady ? 'bg-emerald-300 text-emerald-950 font-bold' : 'bg-white/20 text-white'
                           }`}>
-                            {hasGK ? '🧤 GK 1/1' : '⚠️ Falta GK'}
+                            {teamPresence.isReady ? '🟢 6/6 NA QUADRA' : `Quadra ${teamPresence.presentLines}/6`}
                           </span>
+
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                            lines.length === 6 ? 'bg-emerald-400 text-emerald-950' : 'bg-white/20 text-white'
+                            hasGK ? 'bg-white/20 text-white' : 'bg-amber-400 text-amber-950 font-bold'
                           }`}>
-                            Linha {lines.length}/6
+                            {hasGK ? '🧤 GK' : '🧤 GK Rotativo'}
                           </span>
                         </div>
                       </div>

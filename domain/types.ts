@@ -43,4 +43,6 @@ export interface MatchSession {
   drawDate?: string;
   courtPresence?: Record<string, boolean>;
   reserves?: string[]; // Atletas suplentes / excedentes além dos 24 de linha e 4 goleiros
+  matchCount?: number;
+  peladaStartedAt?: number;
 }

@@ -16,7 +16,7 @@ const CreateMatch: React.FC<CreateMatchProps> = ({ user, onPageChange }) => {
     date: new Date().toISOString().split('T')[0],
     time: '20:00',
     price: 40,
-    fieldSlots: 24,
+    fieldSlots: 30,
     gkSlots: 4
   });
 

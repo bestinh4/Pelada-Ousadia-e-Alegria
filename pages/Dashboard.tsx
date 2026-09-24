@@ -3,7 +3,7 @@ import { Match, Player, Page } from '../types.ts';
 import { db, doc, updateDoc, collection, onSnapshot, addDoc } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification } from '../services/notificationService.ts';
-import { isLateRemovalTime } from '../utils/timeUtils.ts';
+import { isLateRemovalTime, checkLateRemovalDeadline } from '../utils/timeUtils.ts';
 import { playSound } from '../utils/sound.ts';
 
 interface DashboardProps {
@@ -64,6 +64,22 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const updatePresence = async (newStatus: 'presente' | 'ausente') => {
     if (!user || isUpdating) return;
+
+    if (newStatus === 'ausente' && isConfirmed) {
+      const deadlineInfo = checkLateRemovalDeadline(match);
+      if (deadlineInfo.isLate) {
+        const confirmMsg = 
+          `⚠️ MULTA POR CANCELAMENTO APÓS AS 18H DA VÉSPERA ⚠️\n\n` +
+          `O regulamento oficial da pelada estabelece que a retirada do nome deve ser feita até às 18:00 do dia anterior à pelada (${deadlineInfo.formattedDeadline}).\n\n` +
+          `Como o horário limite foi ultrapassado, ao retirar o nome agora será gerada uma MULTA em seu nome. A Diretoria comunicará o valor a ser pago e você entrará como suplente na próxima rodada.\n\n` +
+          `Deseja realmente confirmar a desistência e assumir a multa?`;
+
+        if (!confirm(confirmMsg)) {
+          return;
+        }
+      }
+    }
+
     setIsUpdating(true);
     try {
       if (newStatus === 'presente') {
@@ -78,14 +94,21 @@ const Dashboard: React.FC<DashboardProps> = ({
         updates.confirmedAt = new Date().toISOString();
       } else {
         updates.confirmedAt = null;
-        if (isConfirmed && isLateRemovalTime() && match) {
+        const deadlineInfo = checkLateRemovalDeadline(match);
+        if (isConfirmed && deadlineInfo.isLate && match) {
           await addDoc(collection(db, "lateRemovals"), {
             playerId: user.uid,
-            playerName: currentPlayer?.name || "Atleta",
+            playerName: currentPlayer?.name || user.displayName || "Atleta",
             timestamp: new Date().toISOString(),
             matchId: match.id,
-            matchLocation: match.location
+            matchLocation: match.location || 'Granja Cantinho do Céu',
+            matchDate: match.date || '',
+            status: 'pendente',
+            reason: 'Retirada de nome após as 18h da véspera'
           }).catch(() => {});
+
+          updates.hasLateRemovalFine = true;
+          updates.suplenteNextMatch = true;
         }
       }
 
@@ -330,6 +353,18 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <span className="material-symbols-outlined text-[18px]">event_busy</span>
                   <span>Não poderei comparecer (Desmarcar)</span>
                 </button>
+
+                <div className="flex items-center gap-1.5 text-[11px] text-outline justify-center text-center px-1">
+                  <span className="material-symbols-outlined text-[15px] text-amber-600 shrink-0">schedule</span>
+                  <span>Prazo sem multa: até 18h da véspera ({checkLateRemovalDeadline(match).formattedDeadline})</span>
+                </div>
+
+                {currentPlayer?.hasLateRemovalFine && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-900 flex items-center gap-2 text-xs font-semibold mt-1">
+                    <span className="material-symbols-outlined text-[18px] text-amber-700 shrink-0">info</span>
+                    <span>Você possui pendência de multa por retirada de nome após as 18h da véspera. A Diretoria comunicará o valor a ser pago.</span>
+                  </div>
+                )}
               </div>
             ) : isRefused ? (
               /* CARD DE AUSENTE */

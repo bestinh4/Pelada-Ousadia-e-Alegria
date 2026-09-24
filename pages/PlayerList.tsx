@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Player, Page, Match } from '../types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
 import { db, doc, updateDoc, deleteDoc, collection, addDoc } from '../services/firebase.ts';
@@ -71,16 +72,29 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
     }
   };
 
-  const fieldSlots = 24; // Exatamente 24 jogadores de linha (6 por time x 4 times)
-  const gkSlots = 4; // Exatamente e estritamente 4 vagas para goleiros (1 por time)
-  const totalSlots = fieldSlots + gkSlots; // Total 28 convocados (7 por time)
+  // 5 equipes oficiais da pelada com 4 goleiros e 30 atletas de linha (6 por time)
+  const fieldSlots = match?.fieldSlots && match.fieldSlots === 30 ? match.fieldSlots : 30; 
+  const gkSlots = 4; // Exatamente e estritamente 4 vagas para goleiros
+  const totalSlots = fieldSlots + gkSlots; // 34 atletas titulares no total
 
-  // Garantir que a partida no banco de dados esteja com exatamente 4 vagas de goleiro e 24 de linha
+  // Garantir que as vagas no banco sejam estritamente 4 goleiros e 30 atletas de linha
   useEffect(() => {
-    if (match?.id && (match.gkSlots !== 4 || match.fieldSlots !== 24)) {
-      updateDoc(doc(db, "matches", match.id), { gkSlots: 4, fieldSlots: 24 }).catch(() => {});
+    if (match?.id && (match.gkSlots !== 4 || match.fieldSlots !== 30)) {
+      updateDoc(doc(db, "matches", match.id), { gkSlots: 4, fieldSlots: 30 }).catch(() => {});
     }
   }, [match]);
+
+  // Trava de rolagem de tela quando modal estiver aberto (evita descolamento em mobile)
+  useEffect(() => {
+    if (selectedPlayerForStats) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [selectedPlayerForStats]);
 
   // Ordenar jogadores confirmados por tempo de confirmação
   const sortedPresent = [...players]
@@ -149,13 +163,15 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
     text += `*CONFIRMADOS (${confirmed.length}/${totalSlots}):*\n`;
     
     confirmedGKs.forEach((p, idx) => {
-      const isPaid = p.playerType === 'mensalista' ? p.monthlyPaid : p.paymentStatus === 'pago';
-      text += `${String(idx + 1).padStart(2, '0')}. ${p.name} (GK) [${p.goals || 0}G] [${isPaid ? 'PIX OK' : 'PIX PENDENTE'}]\n`;
+      const isMensalista = p.playerType === 'mensalista';
+      const tag = isMensalista ? ' [MENSALISTA]' : '';
+      text += `${String(idx + 1).padStart(2, '0')}. ${p.name} (GK) [${p.goals || 0}G]${tag}\n`;
     });
 
     confirmedField.forEach((p, idx) => {
-      const isPaid = p.playerType === 'mensalista' ? p.monthlyPaid : p.paymentStatus === 'pago';
-      text += `${String(confirmedGKs.length + idx + 1).padStart(2, '0')}. ${p.name} [${p.goals || 0}G] [${isPaid ? 'PIX OK' : 'PIX PENDENTE'}]\n`;
+      const isMensalista = p.playerType === 'mensalista';
+      const tag = isMensalista ? ' [MENSALISTA]' : '';
+      text += `${String(confirmedGKs.length + idx + 1).padStart(2, '0')}. ${p.name} [${p.goals || 0}G]${tag}\n`;
     });
 
     if (waitingList.length > 0) {
@@ -287,7 +303,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
             <span className="font-label-md text-label-md text-outline">
               {remainingSlots === 0 
                 ? 'Lista principal completa! Novos confirmados entram na fila de espera.'
-                : `Faltam ${remainingSlots} vagas para fechar os 4 times`}
+                : `Faltam ${remainingSlots} vagas para fechar as 5 equipes (30 na linha + 4 goleiros)`}
             </span>
           </div>
 
@@ -512,13 +528,15 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                       {isPresent ? 'PRESENTE' : isAbsent ? 'AUSENTE' : 'PENDENTE'}
                     </span>
 
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded font-label-md text-[10px] font-bold ${
-                      isPaid 
-                        ? 'bg-secondary-fixed text-on-secondary-fixed' 
-                        : 'bg-primary-fixed text-on-primary-fixed-variant'
-                    }`}>
-                      {isPaid ? 'PIX OK' : 'PIX PENDENTE'}
-                    </span>
+                    {player.playerType === 'mensalista' ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded font-label-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300/50">
+                        MENSALISTA
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded font-label-md text-[10px] font-semibold bg-surface-container text-outline">
+                        AVULSO
+                      </span>
+                    )}
 
                     {player.suplenteNextMatch && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded font-label-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
@@ -669,34 +687,51 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
         </button>
       </div>
 
-      {/* MODAL: EDITAR ATLETA & GOLS MARCADOS */}
-      {selectedPlayerForStats && (
-        <div className="fixed inset-0 bg-navy-deep/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-canvas-white rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4 animate-pop-in max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-surface-container-high/60 pb-3">
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-primary-container animate-pulse"></span>
-                  <h3 className="font-headline-sm text-headline-sm text-navy-deep font-bold uppercase">
-                    GERENCIAR ATLETA (ADMIN)
-                  </h3>
+      {/* MODAL: EDITAR ATLETA & GOLS MARCADOS (PORTALIZADO PARA EVITAR TELA AZUL E COM TOTAL RESPONSIVIDADE) */}
+      {selectedPlayerForStats && typeof document !== 'undefined' && createPortal(
+        <div 
+          className="fixed inset-0 z-[99999] bg-navy-deep/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedPlayerForStats(null);
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep rounded-2xl sm:rounded-3xl p-4 sm:p-6 w-full max-w-lg shadow-2xl border border-surface-container-high/60 my-auto flex flex-col gap-4 relative max-h-[92vh] overflow-hidden animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-surface-container-high/60 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center font-bold shrink-0">
+                  <span className="material-symbols-outlined text-[22px]">manage_accounts</span>
                 </div>
-                <p className="font-body-sm text-body-sm text-outline">
-                  Modifique a posição, nome, status e categoria
-                </p>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-primary-container animate-pulse"></span>
+                    <h3 className="font-headline-sm text-base sm:text-lg text-navy-deep font-bold uppercase truncate">
+                      Editar Atleta (Admin)
+                    </h3>
+                  </div>
+                  <p className="font-body-sm text-xs text-outline truncate">
+                    Modifique dados, scout e penalidades
+                  </p>
+                </div>
               </div>
               <button 
+                type="button"
                 onClick={() => setSelectedPlayerForStats(null)} 
-                className="w-8 h-8 rounded-full bg-surface-container-low hover:bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep transition-all"
+                className="w-9 h-9 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-outline hover:text-navy-deep transition-all shrink-0 active:scale-95"
+                title="Fechar"
               >
-                <span className="material-symbols-outlined text-[18px]">close</span>
+                <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
             </div>
 
-            <div className="flex flex-col gap-3.5">
+            {/* Modal Scrollable Body */}
+            <div className="flex flex-col gap-3.5 overflow-y-auto pr-1">
               {/* NOME DO ATLETA */}
               <div>
-                <label className="font-label-md text-label-md text-navy-deep font-semibold block mb-1">
+                <label className="font-label-md text-xs sm:text-sm text-navy-deep font-bold block mb-1">
                   Nome do Atleta
                 </label>
                 <input 
@@ -704,19 +739,19 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                   value={statsData.name}
                   onChange={(e) => setStatsData({ ...statsData, name: e.target.value })}
                   placeholder="Nome do atleta"
-                  className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md font-semibold text-navy-deep focus:bg-canvas-white focus:border-primary-container transition-all"
+                  className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md font-semibold text-navy-deep text-base focus:bg-white focus:border-primary-container transition-all"
                 />
               </div>
 
               {/* POSIÇÃO TÁTICA CADASTRADA */}
               <div>
-                <label className="font-label-md text-label-md text-navy-deep font-semibold block mb-1">
+                <label className="font-label-md text-xs sm:text-sm text-navy-deep font-bold block mb-1">
                   Posição Cadastrada
                 </label>
                 <select 
                   value={statsData.position}
                   onChange={(e) => setStatsData({ ...statsData, position: e.target.value })}
-                  className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md font-bold text-navy-deep focus:bg-canvas-white focus:border-primary-container transition-all cursor-pointer"
+                  className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md font-bold text-navy-deep text-base focus:bg-white focus:border-primary-container transition-all cursor-pointer"
                 >
                   <option value="Goleiro">🧤 Goleiro</option>
                   <option value="Zagueiro">🛡️ Zagueiro</option>
@@ -728,13 +763,13 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="font-label-md text-label-md text-outline block mb-1">Categoria</label>
+                  <label className="font-label-md text-xs sm:text-sm text-outline font-semibold block mb-1">Categoria</label>
                   <select 
                     value={statsData.playerType}
                     onChange={(e) => setStatsData({ ...statsData, playerType: e.target.value as any })}
-                    className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-medium cursor-pointer"
+                    className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-semibold text-base cursor-pointer"
                   >
                     <option value="mensalista">Mensalista VIP</option>
                     <option value="avulso">Avulso</option>
@@ -742,11 +777,11 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                 </div>
 
                 <div>
-                  <label className="font-label-md text-label-md text-outline block mb-1">Permissão</label>
+                  <label className="font-label-md text-xs sm:text-sm text-outline font-semibold block mb-1">Permissão</label>
                   <select 
                     value={statsData.role}
                     onChange={(e) => setStatsData({ ...statsData, role: e.target.value as any })}
-                    className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-medium cursor-pointer"
+                    className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-semibold text-base cursor-pointer"
                   >
                     <option value="player">Atleta</option>
                     <option value="admin">Diretoria (Admin)</option>
@@ -755,11 +790,11 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
               </div>
 
               <div>
-                <label className="font-label-md text-label-md text-outline block mb-1">Status na Lista da Pelada</label>
+                <label className="font-label-md text-xs sm:text-sm text-outline font-semibold block mb-1">Status na Lista da Pelada</label>
                 <select 
                   value={statsData.status}
                   onChange={(e) => setStatsData({ ...statsData, status: e.target.value as any })}
-                  className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-bold cursor-pointer"
+                  className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-bold text-base cursor-pointer"
                 >
                   <option value="presente">🟢 Presente (Confirmado)</option>
                   <option value="pendente">🟡 Pendente</option>
@@ -768,12 +803,12 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
               </div>
 
               {/* PENALIDADE DE SUPLENTE AUTOMÁTICO */}
-              <div className="bg-amber-500/10 p-3.5 rounded-xl border border-amber-500/30 flex items-center justify-between">
+              <div className="bg-amber-500/10 p-3 sm:p-3.5 rounded-xl border border-amber-500/30 flex items-center justify-between gap-3">
                 <div>
-                  <label className="font-label-md text-label-md text-amber-900 font-bold flex items-center gap-1.5">
+                  <label className="font-label-md text-xs sm:text-sm text-amber-900 font-bold flex items-center gap-1.5">
                     <span>⚠️</span> Suplente Automático
                   </label>
-                  <span className="font-body-sm text-xs text-amber-800 block">
+                  <span className="font-body-sm text-[11px] sm:text-xs text-amber-800 block leading-tight">
                     Colocou o nome na lista e faltou na pelada anterior
                   </span>
                 </div>
@@ -781,25 +816,25 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                   type="checkbox"
                   checked={statsData.suplenteNextMatch}
                   onChange={(e) => setStatsData({ ...statsData, suplenteNextMatch: e.target.checked })}
-                  className="w-5 h-5 accent-amber-600 rounded cursor-pointer"
+                  className="w-5 h-5 accent-amber-600 rounded cursor-pointer shrink-0"
                 />
               </div>
 
               {/* SCOUT: GOLS MARCADOS */}
-              <div className="bg-surface-container-low p-3.5 rounded-xl flex items-center justify-between border border-surface-container-high/60">
+              <div className="bg-surface-container-low p-3 sm:p-3.5 rounded-xl flex items-center justify-between border border-surface-container-high/60 gap-2">
                 <div>
-                  <label className="font-label-md text-label-md text-navy-deep font-bold flex items-center gap-1.5">
+                  <label className="font-label-md text-xs sm:text-sm text-navy-deep font-bold flex items-center gap-1.5">
                     <span>⚽</span> Gols Marcados
                   </label>
-                  <span className="font-body-sm text-body-sm text-outline">
+                  <span className="font-body-sm text-xs text-outline block leading-tight">
                     Scout oficial da temporada
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setStatsData({ ...statsData, goals: Math.max(0, statsData.goals - 1) })}
-                    className="w-8 h-8 rounded-lg bg-surface-container-high text-navy-deep flex items-center justify-center font-bold text-lg active:scale-95"
+                    className="w-9 h-9 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-navy-deep flex items-center justify-center font-bold text-lg active:scale-95 transition-all"
                   >
                     -
                   </button>
@@ -808,12 +843,12 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                     min="0"
                     value={statsData.goals}
                     onChange={(e) => setStatsData({ ...statsData, goals: Math.max(0, Number(e.target.value) || 0) })}
-                    className="w-16 p-2 rounded-lg bg-canvas-white text-center font-scoreboard-num text-[22px] text-primary-container font-bold border border-surface-container-high outline-none"
+                    className="w-14 sm:w-16 h-9 rounded-lg bg-white text-center font-scoreboard-num text-xl text-primary-container font-bold border border-surface-container-high outline-none"
                   />
                   <button
                     type="button"
                     onClick={() => setStatsData({ ...statsData, goals: statsData.goals + 1 })}
-                    className="w-8 h-8 rounded-lg bg-primary-container text-on-primary flex items-center justify-center font-bold text-lg active:scale-95 shadow-sm"
+                    className="w-9 h-9 rounded-lg bg-primary-container hover:bg-primary-bright text-on-primary flex items-center justify-center font-bold text-lg active:scale-95 shadow-sm transition-all"
                   >
                     +
                   </button>
@@ -821,7 +856,8 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-2 pt-3 border-t border-surface-container-high/60">
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between gap-2 pt-3 border-t border-surface-container-high/60 shrink-0 flex-wrap sm:flex-nowrap">
               <button 
                 type="button"
                 onClick={() => {
@@ -829,30 +865,33 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                   setSelectedPlayerForStats(null);
                   handleDeletePlayer(p);
                 }}
-                className="px-3 py-2 rounded-xl text-error hover:bg-error/10 font-label-md flex items-center gap-1 transition-all"
+                className="px-3 py-2.5 rounded-xl text-error hover:bg-error/10 font-label-md text-xs sm:text-sm flex items-center gap-1 transition-all active:scale-95"
               >
                 <span className="material-symbols-outlined text-[16px]">delete</span>
                 <span>Excluir</span>
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 ml-auto">
                 <button 
+                  type="button"
                   onClick={() => setSelectedPlayerForStats(null)}
-                  className="px-4 py-2 rounded-xl bg-surface-container-high text-navy-deep font-label-md hover:bg-surface-container-highest transition-all"
+                  className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-surface-container text-navy-deep font-label-md text-xs sm:text-sm hover:bg-surface-container-high transition-all active:scale-95"
                 >
                   Cancelar
                 </button>
                 <button 
+                  type="button"
                   onClick={handleSaveStats}
                   disabled={isSavingStats}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-primary-container to-primary-bright text-on-primary font-headline-sm flex items-center gap-1 shadow-md shadow-primary/20 active:scale-95 transition-all"
+                  className="px-4 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-primary-bright text-on-primary font-headline-sm text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-md shadow-primary/20 active:scale-95 transition-all disabled:opacity-50"
                 >
                   <span>{isSavingStats ? 'Salvando...' : 'Salvar Alterações'}</span>
                 </button>
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

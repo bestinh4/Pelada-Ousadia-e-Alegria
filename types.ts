@@ -29,6 +29,7 @@ export interface Player {
   fcmToken?: string | null;
   suplenteNextMatch?: boolean;
   courtCheckIn?: boolean;
+  hasLateRemovalFine?: boolean;
 }
 
 export interface Expense {
