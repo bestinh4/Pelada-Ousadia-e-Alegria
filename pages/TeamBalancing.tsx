@@ -66,6 +66,57 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   const isMaster = user?.email === MASTER_ADMIN_EMAIL;
   const isAdm = currentUserRole === 'admin' || isMaster;
 
+  // Hierarquia oficial das posições para ordenação tática dentro de cada equipe:
+  // 0: Goleiro | 10-19: Defensores (Zagueiro, Lateral) | 20-29: Meio-Campistas (Volante, Meia, Meia-atacante) | 30-39: Atacantes
+  const getPositionPriority = (position?: string): number => {
+    const pos = (position || '').trim().toLowerCase();
+    if (pos === 'goleiro') return 0;
+    // 1. Defensores
+    if (pos === 'zagueiro' || pos === 'defensor' || pos === 'fixo') return 10;
+    if (pos === 'lateral') return 12;
+    // 2. Meio-Campistas
+    if (pos === 'volante') return 20;
+    if (pos === 'meia' || pos === 'meio-campo' || pos === 'meio campista') return 22;
+    if (pos === 'meia-atacante' || pos === 'ala') return 24;
+    // 3. Atacantes
+    if (pos === 'ponta') return 30;
+    if (pos === 'atacante' || pos === 'centroavante' || pos === 'pivô') return 32;
+    return 40;
+  };
+
+  const getPositionSector = (position?: string): 'goleiro' | 'defesa' | 'meio' | 'ataque' => {
+    const prio = getPositionPriority(position);
+    if (prio === 0) return 'goleiro';
+    if (prio < 20) return 'defesa';
+    if (prio < 30) return 'meio';
+    return 'ataque';
+  };
+
+  const getSectorBadgeStyle = (position?: string) => {
+    const sector = getPositionSector(position);
+    if (sector === 'goleiro') {
+      return { icon: '🧤', badgeClass: 'bg-primary-fixed text-primary-container', sectorTitle: '🧤 GOLEIRO' };
+    }
+    if (sector === 'defesa') {
+      return { icon: '🛡️', badgeClass: 'bg-blue-100 text-blue-900', sectorTitle: '🛡️ DEFENSORES' };
+    }
+    if (sector === 'meio') {
+      return { icon: '🎯', badgeClass: 'bg-amber-100 text-amber-900', sectorTitle: '🎯 MEIO-CAMPISTAS' };
+    }
+    return { icon: '⚽', badgeClass: 'bg-emerald-100 text-emerald-900', sectorTitle: '⚽ ATACANTES' };
+  };
+
+  const sortTeamPlayerIds = (ids: string[]): string[] => {
+    return [...ids].sort((idA, idB) => {
+      const pA = players.find(p => p.id === idA);
+      const pB = players.find(p => p.id === idB);
+      const prioA = getPositionPriority(pA?.position);
+      const prioB = getPositionPriority(pB?.position);
+      if (prioA !== prioB) return prioA - prioB;
+      return (pA?.name || '').localeCompare(pB?.name || '');
+    });
+  };
+
   const confirmedPlayers = players
     .filter(p => p.status === 'presente')
     .sort((a, b) => {
@@ -176,13 +227,16 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       if (attackers.length > 0) assignFieldPlayer(attackers.pop()!);
     }
 
-    // Atualizar status de cada time (são 5 equipes e 4 goleiros, o 5º time terá goleiro rotativo/emprestado)
+    // Ordenar os atletas de cada time na sequência tática oficial: Goleiro -> Defensores -> Meio-Campistas -> Atacantes
     teams.forEach(t => {
+      t.playerIds = sortTeamPlayerIds(t.playerIds);
       const teamGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
       const teamField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
       t.hasGoalkeeper = teamGKs.length > 0;
       t.isIncomplete = teamField.length < 6;
     });
+
+    const sortedReserves = sortTeamPlayerIds(reservePlayerIds);
 
     const newSession: MatchSession = {
       id: "current",
@@ -199,7 +253,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       createdAt: Date.now(),
       drawDate: new Date().toISOString(),
       courtPresence: {},
-      reserves: reservePlayerIds
+      reserves: sortedReserves
     };
 
     try {
@@ -556,8 +610,9 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         return t;
       });
 
-      // Recalcular flags
+      // Recalcular flags e ordenar por posição
       updatedTeams.forEach(t => {
+        t.playerIds = sortTeamPlayerIds(t.playerIds);
         const teamGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
         const teamField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
         t.hasGoalkeeper = teamGKs.length > 0;
@@ -579,7 +634,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     try {
       const updatedTeams = session.teams.map(t => {
         if (t.id === teamId) {
-          return { ...t, playerIds: t.playerIds.filter(id => id !== playerId) };
+          return { ...t, playerIds: sortTeamPlayerIds(t.playerIds.filter(id => id !== playerId)) };
         }
         return t;
       });
@@ -595,7 +650,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
       await updateDoc(doc(db, "sessions", "current"), { 
         teams: updatedTeams,
-        reserves: Array.from(new Set(updatedReserves))
+        reserves: sortTeamPlayerIds(Array.from(new Set(updatedReserves)))
       });
     } catch (e) {
       alert("Erro ao remover atleta.");
@@ -625,7 +680,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       const updatedTeams = session.teams.map(t => {
         if (t.id === targetTeamForAdd) {
           if (t.playerIds.includes(playerId)) return t;
-          return { ...t, playerIds: [...t.playerIds, playerId] };
+          return { ...t, playerIds: sortTeamPlayerIds([...t.playerIds, playerId]) };
         }
         return t;
       });
@@ -633,6 +688,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       const updatedReserves = (session.reserves || []).filter(id => id !== playerId);
 
       updatedTeams.forEach(t => {
+        t.playerIds = sortTeamPlayerIds(t.playerIds);
         const tGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
         const tField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
         t.hasGoalkeeper = tGKs.length > 0;
@@ -695,6 +751,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       }
 
       updatedTeams.forEach(t => {
+        t.playerIds = sortTeamPlayerIds(t.playerIds);
         const teamGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
         const teamField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
         t.hasGoalkeeper = teamGKs.length > 0;
@@ -744,20 +801,21 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
 
     session.teams.forEach((team) => {
-      const gks = team.playerIds
-        .map(pid => players.find(p => p.id === pid))
-        .filter(p => p?.position === 'Goleiro')
-        .map(p => p?.name);
-      
-      const lines = team.playerIds
-        .map(pid => players.find(p => p.id === pid))
-        .filter(p => p && p.position !== 'Goleiro')
-        .map(p => p?.name);
+      const sortedIds = sortTeamPlayerIds(team.playerIds);
+      const teamPlayers = sortedIds.map(pid => players.find(p => p.id === pid)).filter(Boolean) as Player[];
+
+      const gks = teamPlayers.filter(p => getPositionSector(p.position) === 'goleiro').map(p => p.name);
+      const defs = teamPlayers.filter(p => getPositionSector(p.position) === 'defesa').map(p => `${p.name} (${p.position})`);
+      const mids = teamPlayers.filter(p => getPositionSector(p.position) === 'meio').map(p => `${p.name} (${p.position})`);
+      const atks = teamPlayers.filter(p => getPositionSector(p.position) === 'ataque').map(p => `${p.name} (${p.position})`);
 
       const hasGK = gks.length > 0;
       text += `*${team.name.toUpperCase()}* (${team.playerIds.length} Atletas)\n`;
       text += `🧤 *Goleiro:* ${hasGK ? gks.join(', ') : 'GK Rotativo (revezamento)'}\n`;
-      text += `🏃 *Linha (${lines.length}/6):* ${lines.length > 0 ? lines.join(', ') : 'A definir'}\n\n`;
+      if (defs.length > 0) text += `🛡️ *Defensores:* ${defs.join(', ')}\n`;
+      if (mids.length > 0) text += `🎯 *Meio-Campistas:* ${mids.join(', ')}\n`;
+      if (atks.length > 0) text += `⚽ *Atacantes:* ${atks.join(', ')}\n`;
+      text += `\n`;
     });
 
     if (session.reserves && session.reserves.length > 0) {
@@ -1403,104 +1461,120 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                         </div>
                       </div>
 
-                      {/* Lista de Atletas do Time */}
+                      {/* Lista de Atletas do Time Ordenada por Setor Tático (Goleiro -> Defensores -> Meio-Campistas -> Atacantes) */}
                       <div className="p-3 flex flex-col gap-2 flex-1">
                         {team.playerIds.length === 0 ? (
                           <div className="p-4 text-center text-outline text-xs font-body-sm">
                             Nenhum atleta neste time ainda.
                           </div>
                         ) : (
-                          team.playerIds.map((pid) => {
-                            const p = players.find(x => x.id === pid);
-                            const isGK = p?.position === 'Goleiro';
-                            const isCheckedIn = !!session.courtPresence?.[pid];
+                          (() => {
+                            const sortedIds = sortTeamPlayerIds(team.playerIds);
+                            let lastSector: string | null = null;
 
-                            return (
-                              <div 
-                                key={pid}
-                                className={`flex items-center justify-between p-2 rounded-xl border transition-all ${
-                                  isCheckedIn 
-                                    ? 'bg-emerald-50/50 border-emerald-500/30' 
-                                    : 'bg-surface-container-low/50 border-surface-container-high/30'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                  <img 
-                                    src={p?.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(p?.name || 'A')}&background=003a75&color=fff`} 
-                                    className="w-9 h-9 rounded-full object-cover shrink-0 border border-surface-container-high" 
-                                    referrerPolicy="no-referrer" 
-                                    alt=""
-                                  />
-                                  <div className="min-w-0 flex-1">
-                                    <p className="font-headline-sm text-headline-sm text-navy-deep font-bold truncate">
-                                      {p?.name || 'Atleta'}
-                                    </p>
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full uppercase tracking-wider ${
-                                        isGK ? 'bg-primary-fixed text-primary-container' : 'bg-surface-container text-outline'
-                                      }`}>
-                                        {isGK ? '🧤 Goleiro' : p?.position || 'Linha'}
+                            return sortedIds.map((pid) => {
+                              const p = players.find(x => x.id === pid);
+                              const isCheckedIn = !!session.courtPresence?.[pid];
+                              const sector = getPositionSector(p?.position);
+                              const styleInfo = getSectorBadgeStyle(p?.position);
+                              const showSectorHeader = sector !== lastSector;
+                              lastSector = sector;
+
+                              return (
+                                <React.Fragment key={pid}>
+                                  {showSectorHeader && (
+                                    <div className="flex items-center gap-1.5 pt-1.5 pb-0.5 px-1">
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-navy-deep/75">
+                                        {styleInfo.sectorTitle}
                                       </span>
+                                      <div className="flex-1 h-px bg-surface-container-high/60"></div>
+                                    </div>
+                                  )}
+
+                                  <div 
+                                    className={`flex items-center justify-between p-2 rounded-xl border transition-all ${
+                                      isCheckedIn 
+                                        ? 'bg-emerald-50/50 border-emerald-500/30' 
+                                        : 'bg-surface-container-low/50 border-surface-container-high/30'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                      <img 
+                                        src={p?.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(p?.name || 'A')}&background=003a75&color=fff`} 
+                                        className="w-9 h-9 rounded-full object-cover shrink-0 border border-surface-container-high" 
+                                        referrerPolicy="no-referrer" 
+                                        alt=""
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <p className="font-headline-sm text-headline-sm text-navy-deep font-bold truncate">
+                                          {p?.name || 'Atleta'}
+                                        </p>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full uppercase tracking-wider ${styleInfo.badgeClass}`}>
+                                            {styleInfo.icon} {p?.position || 'Linha'}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {/* Check-in de quadra */}
+                                      <button
+                                        onClick={() => handleToggleCourtPresence(pid)}
+                                        className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-0.5 active:scale-95 transition-all ${
+                                          isCheckedIn 
+                                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                                            : 'bg-surface-container text-outline hover:text-navy-deep'
+                                        }`}
+                                        title="Clique para alternar presença física na quadra"
+                                      >
+                                        <span className="material-symbols-outlined text-[13px]">
+                                          {isCheckedIn ? 'check_circle' : 'location_on'}
+                                        </span>
+                                        <span>{isCheckedIn ? 'Na Quadra' : 'Chegou?'}</span>
+                                      </button>
+
+                                      {/* Ações do Administrador */}
+                                      {isAdm && (
+                                        <>
+                                          {/* Mover rápido para outro time */}
+                                          <select
+                                            value=""
+                                            onChange={(e) => {
+                                              if (e.target.value) {
+                                                handleQuickMovePlayerToTeam(pid, team.id, e.target.value);
+                                              }
+                                            }}
+                                            className="h-7 px-1.5 bg-surface-container hover:bg-surface-container-high rounded-lg text-[10px] font-bold text-navy-deep outline-none border border-surface-container-high/50 cursor-pointer"
+                                            title="Mover para outro time"
+                                          >
+                                            <option value="" disabled>Mover...</option>
+                                            {session.teams.map((otherTeam) => {
+                                              if (otherTeam.id === team.id) return null;
+                                              return (
+                                                <option key={otherTeam.id} value={otherTeam.id}>
+                                                  → {otherTeam.name}
+                                                </option>
+                                              );
+                                            })}
+                                          </select>
+
+                                          {/* Remover do Time */}
+                                          <button
+                                            onClick={() => handleRemovePlayerFromTeam(pid, team.id)}
+                                            className="w-7 h-7 rounded-lg text-outline hover:text-error hover:bg-error/10 flex items-center justify-center transition-all"
+                                            title="Remover deste time"
+                                          >
+                                            <span className="material-symbols-outlined text-[16px]">close</span>
+                                          </button>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
-                                </div>
-
-                                <div className="flex items-center gap-1 shrink-0">
-                                  {/* Check-in de quadra */}
-                                  <button
-                                    onClick={() => handleToggleCourtPresence(pid)}
-                                    className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-0.5 active:scale-95 transition-all ${
-                                      isCheckedIn 
-                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
-                                        : 'bg-surface-container text-outline hover:text-navy-deep'
-                                    }`}
-                                    title="Clique para alternar presença física na quadra"
-                                  >
-                                    <span className="material-symbols-outlined text-[13px]">
-                                      {isCheckedIn ? 'check_circle' : 'location_on'}
-                                    </span>
-                                    <span>{isCheckedIn ? 'Na Quadra' : 'Chegou?'}</span>
-                                  </button>
-
-                                  {/* Ações do Administrador */}
-                                  {isAdm && (
-                                    <>
-                                      {/* Mover rápido para outro time */}
-                                      <select
-                                        value=""
-                                        onChange={(e) => {
-                                          if (e.target.value) {
-                                            handleQuickMovePlayerToTeam(pid, team.id, e.target.value);
-                                          }
-                                        }}
-                                        className="h-7 px-1.5 bg-surface-container hover:bg-surface-container-high rounded-lg text-[10px] font-bold text-navy-deep outline-none border border-surface-container-high/50 cursor-pointer"
-                                        title="Mover para outro time"
-                                      >
-                                        <option value="" disabled>Mover...</option>
-                                        {session.teams.map((otherTeam) => {
-                                          if (otherTeam.id === team.id) return null;
-                                          return (
-                                            <option key={otherTeam.id} value={otherTeam.id}>
-                                              → {otherTeam.name}
-                                            </option>
-                                          );
-                                        })}
-                                      </select>
-
-                                      {/* Remover do Time */}
-                                      <button
-                                        onClick={() => handleRemovePlayerFromTeam(pid, team.id)}
-                                        className="w-7 h-7 rounded-lg text-outline hover:text-error hover:bg-error/10 flex items-center justify-center transition-all"
-                                        title="Remover deste time"
-                                      >
-                                        <span className="material-symbols-outlined text-[16px]">close</span>
-                                      </button>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })
+                                </React.Fragment>
+                              );
+                            });
+                          })()
                         )}
 
                         {/* Botão para o Admin adicionar atleta a este time */}
@@ -1630,7 +1704,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                   <option value="">Selecione um atleta...</option>
                   {session.teams.map((t) => (
                     <optgroup key={t.id} label={t.name}>
-                      {t.playerIds.map(pid => {
+                      {sortTeamPlayerIds(t.playerIds).map(pid => {
                         const p = players.find(x => x.id === pid);
                         return (
                           <option key={pid} value={`${t.id}:::${pid}`}>
@@ -1681,16 +1755,16 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                     className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high font-body-md text-navy-deep font-semibold outline-none"
                   >
                     <option value="">Nenhum (Apenas transferir atleta)</option>
-                    {session.teams
-                      .find(t => t.id === targetTeamId)
-                      ?.playerIds.map(pid => {
-                        const p = players.find(x => x.id === pid);
-                        return (
-                          <option key={pid} value={pid}>
-                            Trocar por: {p?.name} ({p?.position})
-                          </option>
-                        );
-                      })}
+                    {sortTeamPlayerIds(
+                      session.teams.find(t => t.id === targetTeamId)?.playerIds || []
+                    ).map(pid => {
+                      const p = players.find(x => x.id === pid);
+                      return (
+                        <option key={pid} value={pid}>
+                          Trocar por: {p?.name} ({p?.position})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               )}
