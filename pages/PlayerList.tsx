@@ -142,8 +142,10 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
 
   // Filtro
   const filteredPlayers = players.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.position.toLowerCase().includes(searchQuery.toLowerCase());
+    const safeName = (p.name || '').toLowerCase();
+    const safePos = (p.position || '').toLowerCase();
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = safeName.includes(q) || safePos.includes(q);
     if (!matchesSearch) return false;
 
     if (selectedFilter === 'confirmed') return p.status === 'presente';

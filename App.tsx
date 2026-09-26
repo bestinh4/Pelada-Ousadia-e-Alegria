@@ -25,11 +25,44 @@ const DEFAULT_PREVIEW_USER = {
   photoURL: 'https://ui-avatars.com/api/?name=Diogo&background=003a75&color=fff'
 };
 
+const VALID_PAGES = new Set<string>(Object.values(Page));
+
+const sanitizePlayer = (id: string, raw: any): Player => {
+  const safeData = raw && typeof raw === 'object' ? raw : {};
+  const safeName = typeof safeData.name === 'string' && safeData.name.trim()
+    ? safeData.name.trim()
+    : (safeData.email === MASTER_ADMIN_EMAIL ? 'Diogo (Admin)' : 'Atleta');
+  const safePosition = typeof safeData.position === 'string' && safeData.position.trim()
+    ? safeData.position.trim()
+    : 'Meia';
+  const safePhoto = typeof safeData.photoUrl === 'string' && safeData.photoUrl.trim()
+    ? safeData.photoUrl
+    : `https://ui-avatars.com/api/?name=${encodeURIComponent(safeName)}&background=003a75&color=fff`;
+
+  return {
+    ...safeData,
+    id: id || safeData.id || 'unknown',
+    name: safeName,
+    position: safePosition,
+    photoUrl: safePhoto,
+    goals: Number(safeData.goals) || 0,
+    assists: Number(safeData.assists) || 0,
+    status: safeData.status === 'presente' || safeData.status === 'ausente' || safeData.status === 'pendente'
+      ? safeData.status
+      : 'pendente',
+    playerType: safeData.playerType === 'mensalista' ? 'mensalista' : 'avulso',
+    role: safeData.role === 'admin' || safeData.email === MASTER_ADMIN_EMAIL ? 'admin' : 'player',
+  } as Player;
+};
+
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(() => {
     const saved = localStorage.getItem('oa_preview_user');
     if (saved) {
-      try { return JSON.parse(saved); } catch {}
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && parsed.uid) return parsed;
+      } catch {}
     }
     const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
     if (!hasLoggedOut) {
@@ -43,14 +76,21 @@ const App: React.FC = () => {
     const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
     if (hasLoggedOut) return Page.Login;
     const saved = localStorage.getItem('oa_current_page');
-    return saved && saved !== Page.Login && saved !== Page.Onboarding ? (saved as Page) : Page.Dashboard;
+    return saved && VALID_PAGES.has(saved) && saved !== Page.Login && saved !== Page.Onboarding
+      ? (saved as Page)
+      : Page.Dashboard;
   });
 
   // Inicializa instantaneamente com os últimos dados reais salvos em cache local (nunca dados genéricos)
   const [players, setPlayers] = useState<Player[]>(() => {
     try {
       const cached = localStorage.getItem('oa_real_players_cache');
-      return cached ? JSON.parse(cached) : [];
+      if (!cached) return [];
+      const parsed = JSON.parse(cached);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter(p => p && typeof p === 'object')
+        .map((p, idx) => sanitizePlayer(p.id || `cached_${idx}`, p));
     } catch {
       return [];
     }
@@ -59,7 +99,9 @@ const App: React.FC = () => {
   const [currentMatch, setCurrentMatch] = useState<Match | null>(() => {
     try {
       const cached = localStorage.getItem('oa_real_match_cache');
-      return cached ? JSON.parse(cached) : null;
+      if (!cached) return null;
+      const parsed = JSON.parse(cached);
+      return parsed && typeof parsed === 'object' && parsed.id ? parsed : null;
     } catch {
       return null;
     }
@@ -125,11 +167,14 @@ const App: React.FC = () => {
         localStorage.removeItem('oa_preview_user');
         setUser(firebaseUser);
 
+        // Garante imediatamente uma página válida antes de qualquer chamada assíncrona ao banco
+        setCurrentPage(prev => (prev === Page.Login ? Page.Dashboard : prev));
+
         try {
           setupForegroundNotifications();
           const playerDocRef = doc(db, "players", firebaseUser.uid);
           const playerDoc = await getDoc(playerDocRef);
-          let userProfileExists = playerDoc.exists();
+          let userProfileExists = playerDoc.exists() && !!playerDoc.data()?.name;
 
           // Se não encontrou pelo UID mas o usuário tem email, verifica se já existe perfil cadastrado com esse email
           if (!userProfileExists && firebaseUser.email) {
@@ -151,17 +196,23 @@ const App: React.FC = () => {
           }
           
           if (firebaseUser.email === MASTER_ADMIN_EMAIL) {
-            const updates: any = {};
-            if (!userProfileExists || playerDoc.data()?.role !== 'admin') updates.role = 'admin';
-            if (playerDoc.exists() && playerDoc.data()?.email !== MASTER_ADMIN_EMAIL) updates.email = MASTER_ADMIN_EMAIL;
-            if (Object.keys(updates).length > 0) await setDoc(playerDocRef, updates, { merge: true }).catch(() => {});
+            const existing = playerDoc.exists() ? playerDoc.data() : {};
+            await setDoc(playerDocRef, {
+              id: firebaseUser.uid,
+              name: existing?.name || firebaseUser.displayName || 'Diogo (Admin)',
+              position: existing?.position || 'Meia',
+              role: 'admin',
+              email: MASTER_ADMIN_EMAIL,
+              photoUrl: existing?.photoUrl || firebaseUser.photoURL || `https://ui-avatars.com/api/?name=Diogo&background=003a75&color=fff`
+            }, { merge: true }).catch(() => {});
+            userProfileExists = true;
           }
 
           if (!userProfileExists) {
             setCurrentPage(Page.Onboarding);
           } else {
             const saved = localStorage.getItem('oa_current_page');
-            if (!saved || saved === Page.Login || saved === Page.Onboarding) {
+            if (!saved || !VALID_PAGES.has(saved) || saved === Page.Login || saved === Page.Onboarding) {
               setCurrentPage(Page.Dashboard);
             }
           }
@@ -177,8 +228,10 @@ const App: React.FC = () => {
           } catch {
             setUser(DEFAULT_PREVIEW_USER);
           }
+          setCurrentPage(prev => (prev === Page.Login ? Page.Dashboard : prev));
         } else if (!hasLoggedOut) {
           setUser(DEFAULT_PREVIEW_USER);
+          setCurrentPage(prev => (prev === Page.Login ? Page.Dashboard : prev));
         } else {
           setUser(null);
           setCurrentPage(Page.Login);
@@ -199,12 +252,17 @@ const App: React.FC = () => {
     const qPlayers = collection(db, "players");
     const unsubscribePlayers = onSnapshot(qPlayers, (snapshot) => {
       const playerList = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as Player))
+        .filter(d => {
+          const raw = d.data();
+          // Ignora documentos vazios sem nome e sem email criados acidentalmente
+          return raw && (raw.name || raw.email);
+        })
+        .map(d => sanitizePlayer(d.id, d.data()))
         .sort((a, b) => (b.goals || 0) - (a.goals || 0));
       
       if (!isInitialPlayersSync) {
         snapshot.docChanges().forEach((change) => {
-          const playerData = change.doc.data() as Player;
+          const playerData = sanitizePlayer(change.doc.id, change.doc.data());
           const oldPlayerData = prevPlayersState.current[change.doc.id];
 
           if (change.type === "modified" && oldPlayerData) {
@@ -239,7 +297,14 @@ const App: React.FC = () => {
       isInitialPlayersSync = false;
       setPlayers(playerList);
       try {
-        localStorage.setItem('oa_real_players_cache', JSON.stringify(playerList));
+        // Evita estourar quota do localStorage caso algum atleta tenha foto base64 gigante
+        const lightCache = playerList.map(p => ({
+          ...p,
+          photoUrl: p.photoUrl && p.photoUrl.length > 2048
+            ? `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=003a75&color=fff`
+            : p.photoUrl
+        }));
+        localStorage.setItem('oa_real_players_cache', JSON.stringify(lightCache));
       } catch {}
     });
 
@@ -354,8 +419,12 @@ const App: React.FC = () => {
     );
   }
 
+  const activePage: Page = !user 
+    ? Page.Login 
+    : (currentPage === Page.Login || !VALID_PAGES.has(currentPage) ? Page.Dashboard : currentPage);
+
   return (
-    <Layout currentPage={currentPage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={enrichedUser}>
+    <Layout currentPage={activePage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={enrichedUser}>
       {isMaintenance && isAdmin && (
         <div className="bg-amber-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between z-50 sticky top-0 shadow-md flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -393,16 +462,16 @@ const App: React.FC = () => {
       />
       <div className="animate-fade-in h-full">
         {!user && <Login onDirectLogin={handleDirectLogin} />}
-        {user && currentPage === Page.Onboarding && <Onboarding user={user} onComplete={() => setCurrentPage(Page.Dashboard)} />}
-        {user && currentPage === Page.Dashboard && <Dashboard match={currentMatch} players={players} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />}
-        {user && currentPage === Page.PlayerList && <PlayerList players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
-        {user && currentPage === Page.Ranking && <Ranking players={players} currentUser={user} onPageChange={setCurrentPage} />}
-        {user && currentPage === Page.Finance && <Finance players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
-        {user && currentPage === Page.CreateMatch && <CreateMatch user={user} onPageChange={setCurrentPage} />}
-        {user && (currentPage === Page.TeamBalancing || currentPage === Page.ArenaPanel) && (
+        {user && activePage === Page.Onboarding && <Onboarding user={user} onComplete={() => setCurrentPage(Page.Dashboard)} />}
+        {user && activePage === Page.Dashboard && <Dashboard match={currentMatch} players={players} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />}
+        {user && activePage === Page.PlayerList && <PlayerList players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
+        {user && activePage === Page.Ranking && <Ranking players={players} currentUser={user} onPageChange={setCurrentPage} />}
+        {user && activePage === Page.Finance && <Finance players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
+        {user && activePage === Page.CreateMatch && <CreateMatch user={user} onPageChange={setCurrentPage} />}
+        {user && (activePage === Page.TeamBalancing || activePage === Page.ArenaPanel) && (
           <TeamBalancing players={players} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />
         )}
-        {user && currentPage === Page.Profile && (
+        {user && activePage === Page.Profile && (
           <Profile 
             player={currentPlayer || { id: user.uid, name: user.displayName || 'Atleta', email: user.email || '', photoUrl: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'Atleta')}&background=0051a2&color=fff`, goals: 0, assists: 0, position: 'Meio-Campo', status: 'pendente', role: effectiveRole, playerType: 'avulso' } as Player} 
             currentUser={user}

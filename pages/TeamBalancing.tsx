@@ -33,7 +33,18 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   const [session, setSession] = useState<MatchSession | null>(() => {
     try {
       const cached = localStorage.getItem('oa_real_session_cache');
-      return cached ? JSON.parse(cached) : null;
+      if (!cached) return null;
+      const parsed = JSON.parse(cached);
+      if (parsed && Array.isArray(parsed.teams)) {
+        parsed.teams = parsed.teams.map((t: any, idx: number) => ({
+          ...t,
+          id: t?.id || `team_${idx + 1}`,
+          name: t?.name || `TIME ${idx + 1}`,
+          playerIds: Array.isArray(t?.playerIds) ? t.playerIds : []
+        }));
+        return parsed as MatchSession;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -129,11 +140,25 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "sessions", "current"), (snap) => {
       if (snap.exists()) {
-        const data = snap.data() as MatchSession;
-        setSession(data);
-        try {
-          localStorage.setItem('oa_real_session_cache', JSON.stringify(data));
-        } catch {}
+        const raw = snap.data() as any;
+        if (raw && Array.isArray(raw.teams)) {
+          const data: MatchSession = {
+            ...raw,
+            teams: raw.teams.map((t: any, idx: number) => ({
+              ...t,
+              id: t?.id || `team_${idx + 1}`,
+              name: t?.name || `TIME ${idx + 1}`,
+              playerIds: Array.isArray(t?.playerIds) ? t.playerIds : []
+            }))
+          };
+          setSession(data);
+          try {
+            localStorage.setItem('oa_real_session_cache', JSON.stringify(data));
+          } catch {}
+        } else {
+          setSession(null);
+          localStorage.removeItem('oa_real_session_cache');
+        }
       } else {
         setSession(null);
         localStorage.removeItem('oa_real_session_cache');
@@ -163,11 +188,11 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     // Animação visual de sorteio
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // 1. Separar goleiros e jogadores de linha
-    const gks = selectedPlayers.filter(p => p.position === 'Goleiro').sort(() => Math.random() - 0.5);
-    const defenders = selectedPlayers.filter(p => p.position === 'Zagueiro' || p.position === 'Lateral').sort(() => Math.random() - 0.5);
-    const midfielders = selectedPlayers.filter(p => p.position === 'Volante' || p.position === 'Meia' || p.position === 'Meia-atacante').sort(() => Math.random() - 0.5);
-    const attackers = selectedPlayers.filter(p => p.position === 'Atacante').sort(() => Math.random() - 0.5);
+    // 1. Separar goleiros e jogadores de linha por setor tático
+    const gks = selectedPlayers.filter(p => getPositionSector(p.position) === 'goleiro').sort(() => Math.random() - 0.5);
+    const defenders = selectedPlayers.filter(p => getPositionSector(p.position) === 'defesa').sort(() => Math.random() - 0.5);
+    const midfielders = selectedPlayers.filter(p => getPositionSector(p.position) === 'meio').sort(() => Math.random() - 0.5);
+    const attackers = selectedPlayers.filter(p => getPositionSector(p.position) === 'ataque').sort(() => Math.random() - 0.5);
 
     const numTeams = 5;
     const teams: Team[] = Array.from({ length: numTeams }, (_, i) => {
@@ -185,7 +210,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
     const reservePlayerIds: string[] = [];
 
-    // 2. Distribuir exatamente até 4 Goleiros (1 para cada equipe até o limite de 4 goleiros da pelada)
+    // 2. Distribuir exatamente até 4 Goleiros na sequência (Time 1 -> Time 2 -> Time 3 -> Time 4)
     for (let i = 0; i < Math.min(numTeams, 4); i++) {
       if (gks.length > 0) {
         const gk = gks.pop()!;
@@ -198,29 +223,39 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       reservePlayerIds.push(gks.pop()!.id);
     }
 
-    // 3. Distribuir os Jogadores de Linha igualmente entre as 5 equipes (meta: 6 por time = 30 no total)
+    // 3. Definir a meta sequencial de cada time:
+    // Completa 100% o Time 1 (6 atletas), depois o Time 2 (6 atletas), depois o Time 3, etc.
+    // Assim, se houver menos de 30 atletas de linha, apenas o último time com jogadores fica incompleto.
+    const totalFieldAvailable = defenders.length + midfielders.length + attackers.length;
+    const targetFieldSizes = Array.from({ length: numTeams }, (_, i) =>
+      Math.max(0, Math.min(6, totalFieldAvailable - i * 6))
+    );
+
     const teamFieldCounts = [0, 0, 0, 0, 0];
     let nextTeamIndex = 0;
 
     const assignFieldPlayer = (p: Player) => {
-      // Encontra a menor contagem para distribuir de forma rigorosamente equilibrada entre os 5 times
-      const minCount = Math.min(...teamFieldCounts);
-      // Se todos os 5 times já completaram 6 atletas de linha (30 no total), excedente vira reserva
-      if (minCount >= 6) {
+      // Filtra apenas as equipes que ainda não atingiram sua meta sequencial (6 nos primeiros times, restante no último)
+      const eligibleTeams = [0, 1, 2, 3, 4].filter(idx => teamFieldCounts[idx] < targetFieldSizes[idx]);
+
+      if (eligibleTeams.length === 0) {
+        // Excedente acima dos 30 titulares de linha vai para a lista de reservas/suplentes
         reservePlayerIds.push(p.id);
         return;
       }
 
-      const eligible = [0, 1, 2, 3, 4].filter(idx => teamFieldCounts[idx] === minCount);
-      let chosenIdx = eligible.find(idx => idx >= nextTeamIndex);
-      if (chosenIdx === undefined) chosenIdx = eligible[0];
+      // Entre os times elegíveis que precisam de atletas, mantém o equilíbrio tático das posições (Defesa/Meio/Ataque)
+      const minCount = Math.min(...eligibleTeams.map(idx => teamFieldCounts[idx]));
+      const bestCandidates = eligibleTeams.filter(idx => teamFieldCounts[idx] === minCount);
+      let chosenIdx = bestCandidates.find(idx => idx >= nextTeamIndex);
+      if (chosenIdx === undefined) chosenIdx = bestCandidates[0];
 
       teams[chosenIdx].playerIds.push(p.id);
       teamFieldCounts[chosenIdx]++;
       nextTeamIndex = (chosenIdx + 1) % numTeams;
     };
 
-    // Intercalamos zaga, meio e ataque para garantir equilíbrio tático
+    // Distribuir defensores, meio-campistas e atacantes respeitando o preenchimento completo dos primeiros times
     while (defenders.length > 0 || midfielders.length > 0 || attackers.length > 0) {
       if (defenders.length > 0) assignFieldPlayer(defenders.pop()!);
       if (midfielders.length > 0) assignFieldPlayer(midfielders.pop()!);

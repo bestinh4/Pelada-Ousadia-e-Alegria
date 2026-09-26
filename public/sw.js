@@ -15,37 +15,17 @@ const messaging = firebase.messaging();
 
 console.log("🛠️ Service Worker carregado!");
 
-const CACHE_NAME = 'oa-elite-pro-v9';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/pwa-192x192.png',
-  '/pwa-512x512.png',
-  '/apple-touch-icon.png'
-];
+const CACHE_NAME = 'oa-elite-pro-v12';
 
-self.addEventListener('install', (event) => {
-  console.log("📥 SW: Instalando...");
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
-  );
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  console.log("🚀 SW: Ativado!");
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log("🗑️ SW: Removendo cache antigo:", cacheName);
-            return caches.delete(cacheName);
-          }
-        })
+        cacheNames.map((cacheName) => caches.delete(cacheName))
       );
     })
   );
@@ -151,31 +131,3 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  // Ignorar requisições que não sejam GET ou que não sejam http/https
-  if (event.request.method !== 'GET' || !event.request.url.startsWith('http')) {
-    return;
-  }
-
-  event.respondWith(
-    fetch(event.request).catch(async () => {
-      const cache = await caches.open(CACHE_NAME);
-      const cachedResponse = await cache.match(event.request);
-      
-      if (cachedResponse) return cachedResponse;
-      
-      // Fallback para navegação (SPA)
-      if (event.request.mode === 'navigate') {
-        const indexFallback = await cache.match('/index.html');
-        if (indexFallback) return indexFallback;
-      }
-      
-      // Retorna uma resposta de erro amigável em vez de undefined
-      return new Response('Recurso não disponível offline', {
-        status: 503,
-        statusText: 'Service Unavailable',
-        headers: new Headers({ 'Content-Type': 'text/plain' })
-      });
-    })
-  );
-});

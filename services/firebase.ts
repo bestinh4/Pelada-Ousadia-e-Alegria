@@ -14,9 +14,6 @@ import {
 } from "firebase/auth";
 import { 
   getFirestore, 
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   doc, 
   updateDoc, 
   setDoc, 
@@ -50,19 +47,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // 2. Inicializar e exportar as instâncias dos serviços vinculadas ao 'app'
 export const auth = getAuth(app);
-
-// Inicializa o Firestore com Cache Persistente Local (IndexedDB) para carregamento instantâneo
-let firestoreInstance;
-try {
-  firestoreInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    })
-  });
-} catch {
-  firestoreInstance = getFirestore(app);
-}
-export const db = firestoreInstance;
+export const db = getFirestore(app);
 
 // 3. Inicializar Messaging com tratamento de erro
 let messagingInstance = null;
