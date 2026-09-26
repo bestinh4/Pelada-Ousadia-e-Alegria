@@ -1,17 +1,18 @@
-import { logout, db, doc, updateDoc, setDoc } from '../services/firebase.ts';
-import React, { useRef, useState } from 'react';
+import { logout, db, doc, updateDoc, setDoc, auth, updateProfile } from '../services/firebase.ts';
+import React, { useRef, useState, useEffect } from 'react';
 import { Player, Page } from '../types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
 import { requestNotificationPermission, getNotificationStatus, sendPushNotification } from '../services/notificationService.ts';
 
 const Profile: React.FC<{ 
   player: Player; 
+  currentUser?: any;
   currentUserEmail?: string; 
   isMaintenance?: boolean;
   onPageChange: (page: Page) => void;
   onLogout?: () => void;
   onPreviewMaintenance?: () => void;
-}> = ({ player, currentUserEmail, isMaintenance = false, onPageChange, onLogout, onPreviewMaintenance }) => {
+}> = ({ player, currentUser, currentUserEmail, isMaintenance = false, onPageChange, onLogout, onPreviewMaintenance }) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isTogglingMaintenance, setIsTogglingMaintenance] = useState(false);
@@ -20,8 +21,17 @@ const Profile: React.FC<{
   const [editedPlayerType, setEditedPlayerType] = useState(player.playerType || 'avulso');
   const [notifStatus, setNotifStatus] = useState(getNotificationStatus());
   
+  // Sincronizar campos quando o perfil for carregado do Firestore
+  useEffect(() => {
+    if (player) {
+      setEditedName(player.name || '');
+      setEditedPosition(player.position || 'Atacante');
+      setEditedPlayerType(player.playerType || 'avulso');
+    }
+  }, [player?.id, player?.name, player?.position, player?.playerType]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const isMaster = currentUserEmail === MASTER_ADMIN_EMAIL;
+  const isMaster = currentUserEmail === MASTER_ADMIN_EMAIL || currentUser?.email === MASTER_ADMIN_EMAIL;
   const isAdm = player.role === 'admin' || isMaster;
 
   const isDirty = editedName !== player.name || editedPosition !== player.position || (isAdm && editedPlayerType !== player.playerType);
@@ -104,8 +114,47 @@ const Profile: React.FC<{
                   setIsUploading(true);
                   const reader = new FileReader();
                   reader.onloadend = async () => {
-                    await updateDoc(doc(db, "players", player.id), { photoUrl: reader.result as string });
-                    setIsUploading(false);
+                    const photoBase64 = reader.result as string;
+                    try {
+                      const targetId = player.id || currentUser?.uid;
+                      if (!targetId) return;
+
+                      // 1. Salvar no Firestore
+                      await setDoc(doc(db, "players", targetId), { 
+                        photoUrl: photoBase64,
+                        id: targetId,
+                        updatedAt: new Date().toISOString()
+                      }, { merge: true });
+
+                      // Sincronizar em user.uid se for diferente
+                      if (currentUser?.uid && targetId !== currentUser.uid) {
+                        await setDoc(doc(db, "players", currentUser.uid), { 
+                          photoUrl: photoBase64,
+                          updatedAt: new Date().toISOString()
+                        }, { merge: true }).catch(() => {});
+                      }
+
+                      // 2. Atualizar no Firebase Auth
+                      if (auth.currentUser) {
+                        await updateProfile(auth.currentUser, { photoURL: photoBase64 }).catch(() => {});
+                      }
+
+                      // 3. Atualizar no localStorage caso esteja em modo direto
+                      const saved = localStorage.getItem('oa_preview_user');
+                      if (saved) {
+                        try {
+                          const parsed = JSON.parse(saved);
+                          parsed.photoURL = photoBase64;
+                          localStorage.setItem('oa_preview_user', JSON.stringify(parsed));
+                        } catch {}
+                      }
+                      alert("Foto de perfil alterada com sucesso!");
+                    } catch (err) {
+                      console.error("Erro ao salvar foto de perfil:", err);
+                      alert("Erro ao salvar a foto de perfil. Tente novamente.");
+                    } finally {
+                      setIsUploading(false);
+                    }
                   };
                   reader.readAsDataURL(file);
                 }} 
@@ -193,16 +242,53 @@ const Profile: React.FC<{
             {isDirty && (
               <button 
                 onClick={async () => {
+                  if (!editedName.trim()) {
+                    return alert("O nome não pode ficar em branco.");
+                  }
                   setIsSaving(true);
                   try {
-                    await updateDoc(doc(db, "players", player.id), {
-                      name: editedName,
+                    const targetId = player.id || currentUser?.uid;
+                    if (!targetId) throw new Error("ID do atleta não encontrado");
+
+                    const updates: any = {
+                      id: targetId,
+                      name: editedName.trim(),
                       position: editedPosition,
-                      playerType: editedPlayerType
-                    });
-                    alert("Dados atualizados com sucesso!");
-                  } catch {
-                    alert("Erro ao atualizar dados.");
+                      playerType: editedPlayerType,
+                      updatedAt: new Date().toISOString()
+                    };
+
+                    if (player.email || currentUser?.email) {
+                      updates.email = player.email || currentUser?.email;
+                    }
+
+                    // 1. Salvar no Firestore usando setDoc com merge para não falhar se for documento novo
+                    await setDoc(doc(db, "players", targetId), updates, { merge: true });
+
+                    // Se player.id for diferente do user.uid, sincroniza também em user.uid
+                    if (currentUser?.uid && targetId !== currentUser.uid) {
+                      await setDoc(doc(db, "players", currentUser.uid), updates, { merge: true }).catch(() => {});
+                    }
+
+                    // 2. Se o usuário estiver autenticado no Firebase Auth, atualiza displayName
+                    if (auth.currentUser) {
+                      await updateProfile(auth.currentUser, { displayName: editedName.trim() }).catch(() => {});
+                    }
+
+                    // 3. Atualizar no localStorage caso esteja em modo direto/preview
+                    const saved = localStorage.getItem('oa_preview_user');
+                    if (saved) {
+                      try {
+                        const parsed = JSON.parse(saved);
+                        parsed.displayName = editedName.trim();
+                        localStorage.setItem('oa_preview_user', JSON.stringify(parsed));
+                      } catch {}
+                    }
+
+                    alert("Perfil atualizado com sucesso!");
+                  } catch (err) {
+                    console.error("Erro ao salvar perfil:", err);
+                    alert("Erro ao atualizar dados. Verifique sua conexão e tente novamente.");
                   } finally {
                     setIsSaving(false);
                   }

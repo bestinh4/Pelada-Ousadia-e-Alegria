@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { db, doc, setDoc } from '../services/firebase.ts';
+import { db, doc, setDoc, auth, updateProfile } from '../services/firebase.ts';
 import { Page } from '../types.ts';
 import { sendPushNotification, broadcastNotification } from '../services/notificationService.ts';
 
@@ -25,9 +25,9 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
       const playerDocRef = doc(db, "players", user.uid);
       await setDoc(playerDocRef, {
         id: user.uid,
-        name: name,
+        name: name.trim(),
         email: user.email,
-        photoUrl: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=0051a2&color=fff`,
+        photoUrl: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(name.trim())}&background=0051a2&color=fff`,
         goals: 0,
         assists: 0,
         concededGoals: 0,
@@ -36,7 +36,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
         paymentStatus: 'pendente',
         status: 'pendente',
         role: 'player'
-      });
+      }, { merge: true });
+
+      if (auth.currentUser) {
+        await updateProfile(auth.currentUser, { displayName: name.trim() }).catch(() => {});
+      }
       
       await broadcastNotification(
         "🚀 NOVO ATLETA!", 

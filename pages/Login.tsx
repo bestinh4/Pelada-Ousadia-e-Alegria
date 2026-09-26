@@ -31,7 +31,7 @@ const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
         uid: "master_admin_diogo",
         email: MASTER_ADMIN_EMAIL,
         displayName: "Diogo (Admin)",
-        photoURL: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
+        photoURL: "https://ui-avatars.com/api/?name=Diogo&background=003a75&color=fff"
       });
     }
   };
@@ -42,7 +42,7 @@ const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
         uid: "atleta_convidado_preview",
         email: "convidado@ousadia.app",
         displayName: "Atleta Convidado",
-        photoURL: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"
+        photoURL: "https://ui-avatars.com/api/?name=Atleta&background=003a75&color=fff"
       });
     }
   };

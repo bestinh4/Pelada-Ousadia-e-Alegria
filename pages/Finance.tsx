@@ -9,8 +9,20 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   const [isSendingReminder, setIsSendingReminder] = useState(false);
   const [filter, setFilter] = useState<'todos' | 'pendentes' | 'pagos'>('todos');
   const [finView, setFinView] = useState<'receitas' | 'despesas'>('receitas');
-  const [prices, setPrices] = useState({ mensalista: 60, avulso: 40 });
-  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [prices, setPrices] = useState(() => {
+    try {
+      const cached = localStorage.getItem('oa_real_finance_cache');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return { mensalista: 60, avulso: 40 };
+  });
+  const [expenses, setExpenses] = useState<Expense[]>(() => {
+    try {
+      const cached = localStorage.getItem('oa_real_expenses_cache');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [newExpense, setNewExpense] = useState({ description: '', amount: 0, category: 'Outros' });
   const [isSavingExpense, setIsSavingExpense] = useState(false);
@@ -21,12 +33,21 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
 
   useEffect(() => {
     const unsubPrices = onSnapshot(doc(db, "settings", "finance"), (docSnap) => {
-      if (docSnap.exists()) setPrices(docSnap.data() as any);
+      if (docSnap.exists()) {
+        const data = docSnap.data() as any;
+        setPrices(data);
+        try {
+          localStorage.setItem('oa_real_finance_cache', JSON.stringify(data));
+        } catch {}
+      }
     });
 
     const unsubExpenses = onSnapshot(collection(db, "expenses"), (snapshot) => {
       const expenseList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense));
       setExpenses(expenseList);
+      try {
+        localStorage.setItem('oa_real_expenses_cache', JSON.stringify(expenseList));
+      } catch {}
     });
 
     return () => {

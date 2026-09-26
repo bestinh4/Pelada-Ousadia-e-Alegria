@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Match, Player, Page } from '../types.ts';
-import { db, doc, updateDoc, collection, onSnapshot, addDoc } from '../services/firebase.ts';
+import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline } from '../utils/timeUtils.ts';
@@ -22,7 +22,16 @@ const Dashboard: React.FC<DashboardProps> = ({
   onPageChange 
 }) => {
   const [isUpdating, setIsUpdating] = useState(false);
-  const [prices, setPrices] = useState({ mensalista: 60, avulso: 40 });
+  const [prices, setPrices] = useState(() => {
+    try {
+      const cached = localStorage.getItem('oa_real_finance_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return { mensalista: parsed.mensalista ?? 60, avulso: parsed.avulso ?? 40 };
+      }
+    } catch {}
+    return { mensalista: 60, avulso: 40 };
+  });
 
   // Admin Quick Actions states
   const [isReleasingList, setIsReleasingList] = useState(false);
@@ -38,13 +47,22 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   useEffect(() => {
     const unsubPrices = onSnapshot(doc(db, "settings", "finance"), (docSnap) => {
-      if (docSnap.exists()) setPrices(docSnap.data() as any);
+      if (docSnap.exists()) {
+        const data = docSnap.data() as any;
+        setPrices(data);
+        try {
+          localStorage.setItem('oa_real_finance_cache', JSON.stringify(data));
+        } catch {}
+      }
     });
     return () => unsubPrices();
   }, []);
 
   // Presença do atleta atual
-  const currentPlayer = players.find(p => p.id === user?.uid);
+  const currentPlayer = players.find(p => 
+    p.id === user?.uid || 
+    (user?.email && p.email && p.email.toLowerCase() === user.email.toLowerCase())
+  );
   const isConfirmed = currentPlayer?.status === 'presente';
   const isRefused = currentPlayer?.status === 'ausente';
 
@@ -112,7 +130,11 @@ const Dashboard: React.FC<DashboardProps> = ({
         }
       }
 
-      await updateDoc(doc(db, "players", user.uid), updates);
+      const targetId = currentPlayer?.id || user.uid;
+      await setDoc(doc(db, "players", targetId), updates, { merge: true });
+      if (targetId !== user.uid) {
+        await setDoc(doc(db, "players", user.uid), updates, { merge: true }).catch(() => {});
+      }
     } catch (e) {
       alert("Erro ao atualizar presença.");
     } finally {

@@ -30,7 +30,14 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
-  const [session, setSession] = useState<MatchSession | null>(null);
+  const [session, setSession] = useState<MatchSession | null>(() => {
+    try {
+      const cached = localStorage.getItem('oa_real_session_cache');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
 
   // Modais administrativos
   const [isRemanageModalOpen, setIsRemanageModalOpen] = useState(false);
@@ -71,9 +78,14 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "sessions", "current"), (snap) => {
       if (snap.exists()) {
-        setSession(snap.data() as MatchSession);
+        const data = snap.data() as MatchSession;
+        setSession(data);
+        try {
+          localStorage.setItem('oa_real_session_cache', JSON.stringify(data));
+        } catch {}
       } else {
         setSession(null);
+        localStorage.removeItem('oa_real_session_cache');
       }
     });
     return () => unsub();

@@ -13,8 +13,8 @@ import TeamBalancing from './pages/TeamBalancing.tsx';
 import NotificationToast, { Notification as InAppNotification } from './components/NotificationToast.tsx';
 import { MaintenanceScreen } from './components/MaintenanceScreen.tsx';
 import { Page, Player, Match } from './types.ts';
-import { MASTER_ADMIN_EMAIL, MOCK_PLAYERS, CURRENT_MATCH } from './constants.tsx';
-import { auth, db, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, limit, where } from './services/firebase.ts';
+import { MASTER_ADMIN_EMAIL } from './constants.tsx';
+import { auth, db, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, setDoc, getDocs, limit, where } from './services/firebase.ts';
 import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications } from './services/notificationService.ts';
 import { playSound } from './utils/sound.ts';
 
@@ -22,7 +22,7 @@ const DEFAULT_PREVIEW_USER = {
   uid: 'master_admin_diogo',
   email: MASTER_ADMIN_EMAIL,
   displayName: 'Diogo (Admin)',
-  photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+  photoURL: 'https://ui-avatars.com/api/?name=Diogo&background=003a75&color=fff'
 };
 
 const App: React.FC = () => {
@@ -33,7 +33,6 @@ const App: React.FC = () => {
     }
     const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
     if (!hasLoggedOut) {
-      // Abre direto com a conta Master Diogo para visualização instantânea no preview
       return DEFAULT_PREVIEW_USER;
     }
     return null;
@@ -47,9 +46,26 @@ const App: React.FC = () => {
     return saved && saved !== Page.Login && saved !== Page.Onboarding ? (saved as Page) : Page.Dashboard;
   });
 
-  const [players, setPlayers] = useState<Player[]>(MOCK_PLAYERS);
-  const [currentMatch, setCurrentMatch] = useState<Match | null>(CURRENT_MATCH);
-  const currentMatchRef = useRef<Match | null>(CURRENT_MATCH);
+  // Inicializa instantaneamente com os últimos dados reais salvos em cache local (nunca dados genéricos)
+  const [players, setPlayers] = useState<Player[]>(() => {
+    try {
+      const cached = localStorage.getItem('oa_real_players_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [currentMatch, setCurrentMatch] = useState<Match | null>(() => {
+    try {
+      const cached = localStorage.getItem('oa_real_match_cache');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const currentMatchRef = useRef<Match | null>(currentMatch);
   const [inAppNotifications, setInAppNotifications] = useState<InAppNotification[]>([]);
   const [isMaintenance, setIsMaintenance] = useState(false);
   const [adminPreviewMaintenance, setAdminPreviewMaintenance] = useState(false);
@@ -113,15 +129,35 @@ const App: React.FC = () => {
           setupForegroundNotifications();
           const playerDocRef = doc(db, "players", firebaseUser.uid);
           const playerDoc = await getDoc(playerDocRef);
+          let userProfileExists = playerDoc.exists();
+
+          // Se não encontrou pelo UID mas o usuário tem email, verifica se já existe perfil cadastrado com esse email
+          if (!userProfileExists && firebaseUser.email) {
+            try {
+              const qEmail = query(collection(db, "players"), where("email", "==", firebaseUser.email), limit(1));
+              const emailSnap = await getDocs(qEmail);
+              if (!emailSnap.empty) {
+                const existingData = emailSnap.docs[0].data();
+                await setDoc(playerDocRef, {
+                  ...existingData,
+                  id: firebaseUser.uid,
+                  email: firebaseUser.email,
+                  name: existingData.name || firebaseUser.displayName || 'Atleta',
+                  photoUrl: existingData.photoUrl || firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(existingData.name || firebaseUser.displayName || 'Atleta')}&background=0051a2&color=fff`
+                }, { merge: true });
+                userProfileExists = true;
+              }
+            } catch {}
+          }
           
           if (firebaseUser.email === MASTER_ADMIN_EMAIL) {
             const updates: any = {};
-            if (!playerDoc.exists() || playerDoc.data()?.role !== 'admin') updates.role = 'admin';
+            if (!userProfileExists || playerDoc.data()?.role !== 'admin') updates.role = 'admin';
             if (playerDoc.exists() && playerDoc.data()?.email !== MASTER_ADMIN_EMAIL) updates.email = MASTER_ADMIN_EMAIL;
-            if (Object.keys(updates).length > 0) await updateDoc(playerDocRef, updates).catch(() => {});
+            if (Object.keys(updates).length > 0) await setDoc(playerDocRef, updates, { merge: true }).catch(() => {});
           }
 
-          if (!playerDoc.exists()) {
+          if (!userProfileExists) {
             setCurrentPage(Page.Onboarding);
           } else {
             const saved = localStorage.getItem('oa_current_page');
@@ -160,9 +196,11 @@ const App: React.FC = () => {
     // Flags locais para esta execução do efeito
     let isInitialPlayersSync = true;
 
-    const qPlayers = query(collection(db, "players"), orderBy("goals", "desc"));
+    const qPlayers = collection(db, "players");
     const unsubscribePlayers = onSnapshot(qPlayers, (snapshot) => {
-      const playerList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Player));
+      const playerList = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Player))
+        .sort((a, b) => (b.goals || 0) - (a.goals || 0));
       
       if (!isInitialPlayersSync) {
         snapshot.docChanges().forEach((change) => {
@@ -199,19 +237,26 @@ const App: React.FC = () => {
       playerList.forEach(p => newState[p.id] = p);
       prevPlayersState.current = newState;
       isInitialPlayersSync = false;
-      setPlayers(playerList.length > 0 ? playerList : MOCK_PLAYERS);
+      setPlayers(playerList);
+      try {
+        localStorage.setItem('oa_real_players_cache', JSON.stringify(playerList));
+      } catch {}
     });
 
-    // Ajustado para garantir que a UI limpe quando não houver partidas
-    const qMatches = query(collection(db, "matches"), orderBy("createdAt", "desc"));
+    // Busca apenas a convocação atual (limit 1) para carregamento ultrarrápido
+    const qMatches = query(collection(db, "matches"), orderBy("createdAt", "desc"), limit(1));
     const unsubscribeMatches = onSnapshot(qMatches, (snapshot) => {
       if (!snapshot.empty) {
         const matchData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Match;
         setCurrentMatch(matchData);
         currentMatchRef.current = matchData;
+        try {
+          localStorage.setItem('oa_real_match_cache', JSON.stringify(matchData));
+        } catch {}
       } else {
-        setCurrentMatch(CURRENT_MATCH);
-        currentMatchRef.current = CURRENT_MATCH;
+        setCurrentMatch(null);
+        currentMatchRef.current = null;
+        localStorage.removeItem('oa_real_match_cache');
       }
     });
 
@@ -221,11 +266,10 @@ const App: React.FC = () => {
     const qBroadcasts = query(
       collection(db, "notifications"), 
       where("createdAt", ">", startTime),
-      orderBy("createdAt", "desc")
+      orderBy("createdAt", "desc"),
+      limit(10)
     );
     
-    console.log("📡 Ouvindo novas notificações desde:", startTime);
-
     const unsubscribeBroadcasts = onSnapshot(qBroadcasts, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
@@ -234,15 +278,12 @@ const App: React.FC = () => {
           // Evitar notificar o próprio remetente
           if (data.senderId === user.uid) return;
 
-          console.log("🔔 Nova notificação recebida via DB:", data.title);
           playSound('cheer');
           sendPushNotification(data.title, data.body);
           addInAppNotification(data.title, data.body, 'info');
         }
       });
-    }, (error) => {
-      console.error("❌ Erro no listener de notificações:", error);
-    });
+    }, () => {});
 
     return () => {
       unsubscribePlayers();
@@ -262,10 +303,16 @@ const App: React.FC = () => {
     );
   }
 
-  const currentPlayer = players.find(p => p.id === user?.uid);
+  const currentPlayer = players.find(p => 
+    p.id === user?.uid || 
+    (user?.email && p.email && p.email.toLowerCase() === user.email.toLowerCase())
+  );
   const isMaster = user?.email === MASTER_ADMIN_EMAIL;
   const effectiveRole = isMaster ? 'admin' : (currentPlayer?.role || 'player');
   const isAdmin = effectiveRole === 'admin' || isMaster;
+  const enrichedUser = currentPlayer 
+    ? { ...user, photoURL: currentPlayer.photoUrl || user?.photoURL, displayName: currentPlayer.name || user?.displayName }
+    : user;
 
   // Se o aplicativo estiver em Modo de Manutenção (para atletas) ou o Admin estiver pré-visualizando
   if ((isMaintenance && !isAdmin) || (isAdmin && adminPreviewMaintenance)) {
@@ -308,7 +355,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <Layout currentPage={currentPage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={user}>
+    <Layout currentPage={currentPage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={enrichedUser}>
       {isMaintenance && isAdmin && (
         <div className="bg-amber-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between z-50 sticky top-0 shadow-md flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -357,7 +404,8 @@ const App: React.FC = () => {
         )}
         {user && currentPage === Page.Profile && (
           <Profile 
-            player={currentPlayer || { id: user.uid, name: user.displayName, email: user.email, photoUrl: user.photoURL, goals: 0, assists: 0, position: 'A definir', status: 'pendente', role: effectiveRole } as Player} 
+            player={currentPlayer || { id: user.uid, name: user.displayName || 'Atleta', email: user.email || '', photoUrl: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'Atleta')}&background=0051a2&color=fff`, goals: 0, assists: 0, position: 'Meio-Campo', status: 'pendente', role: effectiveRole, playerType: 'avulso' } as Player} 
+            currentUser={user}
             currentUserEmail={user?.email} 
             isMaintenance={isMaintenance}
             onPageChange={setCurrentPage} 

@@ -15,26 +15,26 @@ const Ranking: React.FC<RankingProps> = ({ players, currentUser, onPageChange })
   const sortedPlayers = [...players].sort((a, b) => (b.goals || 0) - (a.goals || 0));
 
   const top1 = sortedPlayers[0] || {
-    name: 'Gabriel Gol',
-    goals: 24,
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    position: 'Atacante',
+    name: 'A definir',
+    goals: 0,
+    photoUrl: 'https://ui-avatars.com/api/?name=1&background=003a75&color=fff',
+    position: '-',
     playerType: 'mensalista'
   };
 
   const top2 = sortedPlayers[1] || {
-    name: 'Matheuzinho',
-    goals: 19,
-    photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-    position: 'Meia-atacante',
+    name: 'A definir',
+    goals: 0,
+    photoUrl: 'https://ui-avatars.com/api/?name=2&background=003a75&color=fff',
+    position: '-',
     playerType: 'mensalista'
   };
 
   const top3 = sortedPlayers[2] || {
-    name: 'Luan Canhota',
-    goals: 15,
-    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150',
-    position: 'Ponta',
+    name: 'A definir',
+    goals: 0,
+    photoUrl: 'https://ui-avatars.com/api/?name=3&background=003a75&color=fff',
+    position: '-',
     playerType: 'mensalista'
   };
 
