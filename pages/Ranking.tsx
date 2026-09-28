@@ -59,222 +59,175 @@ const Ranking: React.FC<RankingProps> = ({ players, currentUser, onPageChange })
     }, 800);
   };
 
+  const restPlayers = sortedPlayers.slice(3);
+
   return (
-    <div className="flex flex-col w-full max-w-2xl mx-auto px-margin pb-space-xl gap-space-md animate-fade-in">
-      {/* HEADER CARD */}
-      <div className="relative w-full rounded-2xl bg-surface-container-lowest p-space-md shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40 transition-all">
-        {/* Stadium Aura Decoration */}
-        <div className="absolute -right-12 -top-12 w-44 h-44 rounded-full bg-primary-container/10 blur-2xl pointer-events-none animate-pulse-slow"></div>
-        <div className="absolute -left-12 -bottom-12 w-36 h-36 rounded-full bg-secondary/10 blur-2xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex flex-col gap-space-sm">
-          {/* Header Row */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
+    <div className="flex flex-col w-full max-w-3xl mx-auto pb-6 gap-4 animate-fade-in">
+      {/* BARRA DE RESUMO + EXPORTAR ZAP */}
+      <div className="w-full rounded-2xl bg-surface-container-lowest p-3.5 sm:p-4 shadow-xs border border-surface-container-high/50 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 flex items-center justify-center shrink-0 border border-amber-500/30">
+            <span className="material-symbols-outlined text-[22px]">emoji_events</span>
+          </div>
+          <div>
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 flex items-center justify-center shrink-0 border border-amber-500/30">
-                <span className="material-symbols-outlined text-[22px]">emoji_events</span>
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
-                  <span className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                    Artilharia & Ranking Geral
-                  </span>
-                </div>
-                <span className="font-body-sm text-body-sm text-outline">
-                  Temporada 2026 • Scout oficial de gols marcados
-                </span>
-              </div>
-            </div>
-
-            <span className="bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">
-              AO VIVO
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* TOP 3 PODIUM CARDS */}
-      <section className="flex flex-col gap-space-sm">
-        <div className="flex items-center justify-between">
-          <span className="font-label-caps text-label-caps text-on-surface-variant tracking-wider">
-            PÓDIO DOS ARTILHEIROS
-          </span>
-          <span className="font-body-sm text-body-sm text-outline">
-            {totalLeagueGoals} gols somados
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-space-md items-end">
-          {/* #2 CARD - SILVER */}
-          <div className="order-2 md:order-1 relative rounded-2xl p-space-md bg-surface-container-lowest shadow-md flex flex-col items-center text-center gap-space-xs border border-surface-container-high/40 animate-slide-up transition-transform duration-300 hover:scale-[1.02]">
-            <div className="w-8 h-8 rounded-full bg-surface-container-highest flex items-center justify-center text-on-surface font-label-caps text-label-caps font-bold shadow-sm">
-              2º
-            </div>
-            <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-surface-container-highest my-1 shadow-sm">
-              <img src={top2.photoUrl} alt={top2.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            </div>
-            <span className="font-headline-sm text-headline-sm text-navy-deep font-bold break-words max-w-full text-center">
-              {top2.name}
-            </span>
-            <span className="font-body-sm text-body-sm text-outline -mt-1">
-              {top2.position}
-            </span>
-            <div className="flex items-baseline gap-1 mt-1 bg-surface-container-low px-3 py-1 rounded-full">
-              <span className="font-scoreboard-num text-[28px] text-navy-deep leading-none font-bold">
-                {top2.goals || 0}
+              <span className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold">
+                Temporada 2026
               </span>
-              <span className="font-label-caps text-[11px] text-outline">GOLS</span>
-            </div>
-          </div>
-
-          {/* #1 CARD - GOLDEN ELEVATED */}
-          <div className="order-1 md:order-2 relative rounded-2xl p-space-md bg-gradient-to-b from-amber-500/10 via-surface-container-lowest to-surface-container-lowest border-2 border-amber-400 shadow-xl flex flex-col items-center text-center gap-space-xs -translate-y-2 md:-translate-y-4 animate-pop-in transition-transform duration-300 hover:scale-[1.03]">
-            {/* Animated Trophy */}
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-500 to-amber-300 flex items-center justify-center text-on-primary-fixed shadow-md shadow-amber-400/30 font-label-caps text-label-caps font-bold animate-bounce-slow">
-              <span className="material-symbols-outlined text-[20px] text-canvas-white">military_tech</span>
-            </div>
-
-            <div className="w-20 h-20 rounded-full overflow-hidden border-4 border-amber-400 my-1 shadow-md shadow-amber-400/20">
-              <img src={top1.photoUrl} alt={top1.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            </div>
-
-            <span className="font-headline-sm text-headline-sm text-navy-deep font-bold break-words max-w-full text-center">
-              {top1.name}
-            </span>
-            <span className="font-label-caps text-[11px] text-amber-700 bg-amber-400/20 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-              👑 Chuteira de Ouro
-            </span>
-
-            {/* Huge Goal Stat */}
-            <div className="flex items-baseline gap-1.5 mt-2 bg-gradient-to-r from-amber-400/20 to-primary-container/10 px-4 py-1.5 rounded-full">
-              <span className="font-scoreboard-num text-[38px] text-primary-container leading-none font-bold">
-                {top1.goals || 0}
+              <span className="bg-secondary-fixed text-on-secondary-fixed text-[10px] px-2 py-0.5 rounded-full uppercase font-bold">
+                {totalLeagueGoals} Gols
               </span>
-              <span className="font-label-caps text-[13px] text-navy-deep font-bold">GOLS MARCADOS</span>
             </div>
-          </div>
-
-          {/* #3 CARD - BRONZE */}
-          <div className="order-3 md:order-3 relative rounded-2xl p-space-md bg-surface-container-lowest shadow-md flex flex-col items-center text-center gap-space-xs border border-surface-container-high/40 animate-slide-up transition-transform duration-300 hover:scale-[1.02]">
-            <div className="w-8 h-8 rounded-full bg-amber-700/20 text-amber-900 flex items-center justify-center font-label-caps text-label-caps font-bold shadow-sm">
-              3º
-            </div>
-            <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-amber-700/30 my-1 shadow-sm">
-              <img src={top3.photoUrl} alt={top3.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            </div>
-            <span className="font-headline-sm text-headline-sm text-navy-deep font-bold break-words max-w-full text-center">
-              {top3.name}
+            <span className="font-body-sm text-xs text-outline block">
+              Ranking oficial de artilharia • {players.length} atletas
             </span>
-            <span className="font-body-sm text-body-sm text-outline -mt-1">
-              {top3.position}
-            </span>
-            <div className="flex items-baseline gap-1 mt-1 bg-surface-container-low px-3 py-1 rounded-full">
-              <span className="font-scoreboard-num text-[28px] text-navy-deep leading-none font-bold">
-                {top3.goals || 0}
-              </span>
-              <span className="font-label-caps text-[11px] text-outline">GOLS</span>
-            </div>
           </div>
-        </div>
-      </section>
-
-      {/* FULL LEADERBOARD TABLE - STRICTLY GOALS */}
-      <section className="flex flex-col gap-space-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-primary-container text-[20px]">sports_soccer</span>
-            <h2 className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-              Classificação dos Artilheiros
-            </h2>
-          </div>
-          <span className="font-label-md text-label-md text-outline">
-            {players.length} Atletas
-          </span>
-        </div>
-
-        <div className="w-full rounded-2xl bg-surface-container-lowest shadow-sm border border-surface-container-high/40 overflow-hidden divide-y divide-surface-container-high/40">
-          {sortedPlayers.map((player, idx) => {
-            const isPodium = idx < 3;
-            const isUser = player.id === currentUser?.uid;
-
-            return (
-              <div 
-                key={player.id}
-                className={`flex items-center justify-between p-space-sm transition-colors ${
-                  isUser 
-                    ? 'bg-secondary-fixed/30 border-l-4 border-l-secondary' 
-                    : 'hover:bg-surface-container-low/50'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className={`font-scoreboard-num text-[20px] leading-none w-6 text-center shrink-0 ${
-                    idx === 0 
-                      ? 'text-amber-500 font-bold' 
-                      : idx === 1 
-                        ? 'text-slate-400 font-bold' 
-                        : idx === 2 
-                          ? 'text-amber-700 font-bold' 
-                          : 'text-outline'
-                  }`}>
-                    {idx + 1}º
-                  </span>
-
-                  <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-surface-container shadow-xs">
-                    <img src={player.photoUrl} alt={player.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  </div>
-
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-headline-sm text-headline-sm text-navy-deep break-words">
-                          {player.name}
-                        </span>
-                        {isUser && (
-                          <span className="text-[10px] font-bold text-secondary bg-secondary-fixed px-1.5 py-0.2 rounded uppercase shrink-0">
-                            Você
-                          </span>
-                        )}
-                      </div>
-                      <span className="font-body-sm text-body-sm text-outline break-words">
-                        {player.position} • {player.playerType === 'mensalista' ? 'Mensalista' : 'Avulso'}
-                      </span>
-                    </div>
-                </div>
-
-                {/* Single Scout: Gols Marcados */}
-                <div className="flex items-center gap-1.5 shrink-0 pl-2">
-                  <span className="font-scoreboard-num text-[28px] text-primary-container font-bold leading-none">
-                    {player.goals || 0}
-                  </span>
-                  <span className="font-label-caps text-label-caps text-outline text-[12px]">
-                    {player.goals === 1 ? 'GOL' : 'GOLS'}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* WHATSAPP EXPORT CARD */}
-      <section className="rounded-2xl p-space-md bg-gradient-to-br from-tertiary-container via-tertiary to-navy-deep text-on-tertiary shadow-xl flex flex-col sm:flex-row items-center justify-between gap-space-sm">
-        <div className="flex flex-col">
-          <span className="font-headline-sm text-headline-sm font-bold">
-            Compartilhar Artilharia no WhatsApp
-          </span>
-          <span className="font-body-sm text-body-sm opacity-90">
-            Envie o resumo dos maiores goleadores direto no grupo da pelada!
-          </span>
         </div>
 
         <button 
           onClick={handleExportWhatsApp}
-          className="w-full sm:w-auto px-5 py-3 rounded-xl bg-canvas-white text-navy-deep font-headline-sm text-headline-sm flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all shrink-0 hover:bg-surface-container"
+          className="h-9 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-xs active:scale-95 transition-all shrink-0"
         >
-          <span className="material-symbols-outlined text-[20px] text-tertiary">share</span>
-          <span>{exportFeedback ? 'COPIADO!' : 'ENVIAR PRO ZAP'}</span>
+          <span className="material-symbols-outlined text-[16px]">share</span>
+          <span>{exportFeedback ? 'COPIADO!' : 'ZAP ARTILHARIA'}</span>
         </button>
+      </div>
+
+      {/* PÓDIO DOS ARTILHEIROS (RESPONSIVO EM 3 COLUNAS NO MOBILE E DESKTOP) */}
+      <section className="grid grid-cols-3 gap-2 sm:gap-4 items-end pt-2">
+        {/* #2 CARD - SILVER */}
+        <div className="relative rounded-2xl p-2.5 sm:p-4 bg-surface-container-lowest shadow-sm flex flex-col items-center text-center gap-1 border border-surface-container-high/50">
+          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-surface-container-highest flex items-center justify-center text-on-surface font-label-caps text-[11px] sm:text-xs font-bold">
+            2º
+          </div>
+          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full overflow-hidden border-2 border-slate-300 my-0.5 shadow-xs">
+            <img src={top2.photoUrl} alt={top2.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          </div>
+          <span className="font-headline-sm text-xs sm:text-sm text-navy-deep font-bold truncate w-full">
+            {top2.name}
+          </span>
+          <span className="text-[10px] text-outline truncate w-full">
+            {top2.position}
+          </span>
+          <div className="flex items-baseline gap-1 mt-1 bg-surface-container-low px-2.5 py-0.5 rounded-full">
+            <span className="font-scoreboard-num text-xl sm:text-2xl text-navy-deep leading-none font-bold">
+              {top2.goals || 0}
+            </span>
+            <span className="font-label-caps text-[9px] sm:text-[10px] text-outline">GOLS</span>
+          </div>
+        </div>
+
+        {/* #1 CARD - GOLDEN ELEVATED */}
+        <div className="relative rounded-2xl p-3 sm:p-5 bg-gradient-to-b from-amber-500/15 via-surface-container-lowest to-surface-container-lowest border-2 border-amber-400 shadow-lg flex flex-col items-center text-center gap-1 -translate-y-2">
+          <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-gradient-to-tr from-amber-500 to-amber-300 flex items-center justify-center text-on-primary-fixed shadow-sm font-bold">
+            <span className="material-symbols-outlined text-[16px] sm:text-[20px] text-canvas-white">military_tech</span>
+          </div>
+
+          <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-full overflow-hidden border-3 border-amber-400 my-0.5 shadow-sm">
+            <img src={top1.photoUrl} alt={top1.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          </div>
+
+          <span className="font-headline-sm text-xs sm:text-base text-navy-deep font-bold truncate w-full">
+            {top1.name}
+          </span>
+          <span className="text-[9px] sm:text-[10px] text-amber-800 bg-amber-400/25 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider truncate max-w-full">
+            👑 1º Lugar
+          </span>
+
+          <div className="flex items-baseline gap-1 mt-1 bg-amber-400/20 px-3 py-1 rounded-full">
+            <span className="font-scoreboard-num text-2xl sm:text-3xl text-primary-container leading-none font-bold">
+              {top1.goals || 0}
+            </span>
+            <span className="font-label-caps text-[10px] sm:text-xs text-navy-deep font-bold">GOLS</span>
+          </div>
+        </div>
+
+        {/* #3 CARD - BRONZE */}
+        <div className="relative rounded-2xl p-2.5 sm:p-4 bg-surface-container-lowest shadow-sm flex flex-col items-center text-center gap-1 border border-surface-container-high/50">
+          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-amber-700/20 text-amber-900 flex items-center justify-center font-label-caps text-[11px] sm:text-xs font-bold">
+            3º
+          </div>
+          <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full overflow-hidden border-2 border-amber-700/30 my-0.5 shadow-xs">
+            <img src={top3.photoUrl} alt={top3.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          </div>
+          <span className="font-headline-sm text-xs sm:text-sm text-navy-deep font-bold truncate w-full">
+            {top3.name}
+          </span>
+          <span className="text-[10px] text-outline truncate w-full">
+            {top3.position}
+          </span>
+          <div className="flex items-baseline gap-1 mt-1 bg-surface-container-low px-2.5 py-0.5 rounded-full">
+            <span className="font-scoreboard-num text-xl sm:text-2xl text-navy-deep leading-none font-bold">
+              {top3.goals || 0}
+            </span>
+            <span className="font-label-caps text-[9px] sm:text-[10px] text-outline">GOLS</span>
+          </div>
+        </div>
       </section>
+
+      {/* DEMAIS COLOCADOS (4º EM DIANTE - SEM REPETIR O PÓDIO) */}
+      {restPlayers.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <div className="flex items-center justify-between px-1">
+            <span className="font-label-caps text-xs text-outline uppercase tracking-wider font-bold">
+              DEMAIS ARTILHEIROS (4º AO {sortedPlayers.length}º)
+            </span>
+          </div>
+
+          <div className="w-full rounded-2xl bg-surface-container-lowest shadow-xs border border-surface-container-high/40 overflow-hidden divide-y divide-surface-container-high/40">
+            {restPlayers.map((player, index) => {
+              const rankPos = index + 4;
+              const isUser = player.id === currentUser?.uid;
+
+              return (
+                <div 
+                  key={player.id}
+                  className={`flex items-center justify-between p-3 transition-colors ${
+                    isUser 
+                      ? 'bg-secondary-fixed/30 border-l-4 border-l-secondary' 
+                      : 'hover:bg-surface-container-low/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className="font-scoreboard-num text-lg leading-none w-7 text-center shrink-0 text-outline">
+                      {rankPos}º
+                    </span>
+
+                    <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 bg-surface-container shadow-xs">
+                      <img src={player.photoUrl} alt={player.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-headline-sm text-sm text-navy-deep font-bold truncate">
+                          {player.name}
+                        </span>
+                        {isUser && (
+                          <span className="text-[10px] font-bold text-secondary bg-secondary-fixed px-1.5 py-0.5 rounded uppercase shrink-0">
+                            Você
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-outline truncate">
+                        {player.position}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0 pl-2">
+                    <span className="font-scoreboard-num text-2xl text-primary-container font-bold leading-none">
+                      {player.goals || 0}
+                    </span>
+                    <span className="font-label-caps text-outline text-[11px]">
+                      {player.goals === 1 ? 'GOL' : 'GOLS'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

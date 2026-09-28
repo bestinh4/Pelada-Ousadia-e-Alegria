@@ -37,57 +37,32 @@ const Profile: React.FC<{
   const isDirty = editedName !== player.name || editedPosition !== player.position || (isAdm && editedPlayerType !== player.playerType);
 
   return (
-    <div className="flex flex-col w-full max-w-2xl mx-auto px-margin pb-space-xl gap-space-md animate-fade-in">
-      {/* HEADER CARD */}
-      <div className="relative w-full rounded-2xl bg-surface-container-lowest p-space-md shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40 transition-all">
-        {/* Stadium Aura Decoration */}
-        <div className="absolute -right-12 -top-12 w-44 h-44 rounded-full bg-primary-container/10 blur-2xl pointer-events-none animate-pulse-slow"></div>
-        <div className="absolute -left-12 -bottom-12 w-36 h-36 rounded-full bg-secondary/10 blur-2xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center shrink-0 border border-primary-container/20">
-              <span className="material-symbols-outlined text-[22px]">badge</span>
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
-                <span className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                  Meu Perfil Oficial
-                </span>
-              </div>
-              <span className="font-body-sm text-body-sm text-outline">
-                Carteira de Atleta • Configurações
-              </span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">
-              {isAdm ? 'DIRETORIA' : 'ATLETA'}
-            </span>
-            <button 
-              onClick={async () => {
-                try { await logout(); } catch {}
-                if (onLogout) onLogout();
-              }} 
-              className="h-9 px-3 rounded-xl bg-surface-container-low hover:bg-error/10 text-error font-headline-sm text-headline-sm flex items-center gap-1.5 border border-surface-container-high/60 active:scale-95 transition-all"
-              title="Sair da Conta"
-            >
-              <span className="material-symbols-outlined text-[18px]">logout</span>
-              <span>SAIR</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-space-md items-start">
+    <div className="flex flex-col w-full max-w-3xl mx-auto pb-6 gap-4 animate-fade-in">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
         {/* Left Column: Player Card */}
         <div className="md:col-span-5 flex flex-col items-center">
-          <div className="w-full bg-surface-container-lowest rounded-2xl p-space-md flex flex-col items-center text-center shadow-sm relative overflow-hidden border border-surface-container-high/40">
-            <div className="relative my-3">
+          <div className="w-full bg-surface-container-lowest rounded-2xl p-4 sm:p-5 flex flex-col items-center text-center shadow-xs relative overflow-hidden border border-surface-container-high/50">
+            {/* Top Bar inside Card: Badge + Logout */}
+            <div className="w-full flex items-center justify-between mb-1">
+              <span className="bg-secondary-fixed text-on-secondary-fixed text-[10px] px-2.5 py-1 rounded-full uppercase tracking-wider font-bold">
+                {isAdm ? 'DIRETORIA' : 'ATLETA'}
+              </span>
+              <button 
+                onClick={async () => {
+                  try { await logout(); } catch {}
+                  if (onLogout) onLogout();
+                }} 
+                className="h-8 px-2.5 rounded-lg bg-surface-container-low hover:bg-error/10 text-error font-headline-sm text-xs font-bold flex items-center gap-1 border border-surface-container-high/60 active:scale-95 transition-all"
+                title="Sair da Conta"
+              >
+                <span className="material-symbols-outlined text-[16px]">logout</span>
+                <span>SAIR</span>
+              </button>
+            </div>
+
+            <div className="relative my-2">
               <div 
-                className={`w-28 h-28 rounded-2xl border-4 ${isAdm ? 'border-primary-container ring-4 ring-primary-container/20' : 'border-surface-container-low'} shadow-md overflow-hidden relative z-10 bg-surface-container cursor-pointer`} 
+                className={`w-24 h-24 sm:w-28 sm:h-28 rounded-2xl border-4 ${isAdm ? 'border-primary-container ring-4 ring-primary-container/20' : 'border-surface-container-low'} shadow-md overflow-hidden relative z-10 bg-surface-container cursor-pointer`} 
                 onClick={() => fileInputRef.current?.click()}
               >
                 <img src={player.photoUrl} className="w-full h-full object-cover" alt="" referrerPolicy="no-referrer" />
@@ -99,7 +74,7 @@ const Profile: React.FC<{
               </div>
               <button 
                 onClick={() => fileInputRef.current?.click()} 
-                className="absolute -bottom-2 -right-2 w-9 h-9 bg-navy-deep text-on-secondary rounded-xl flex items-center justify-center z-20 shadow-md active:scale-95 transition-all"
+                className="absolute -bottom-2 -right-2 w-8 h-8 bg-navy-deep text-on-secondary rounded-xl flex items-center justify-center z-20 shadow-md active:scale-95 transition-all"
                 title="Alterar Foto"
               >
                 <span className="material-symbols-outlined text-[16px]">add_a_photo</span>
@@ -119,14 +94,12 @@ const Profile: React.FC<{
                       const targetId = player.id || currentUser?.uid;
                       if (!targetId) return;
 
-                      // 1. Salvar no Firestore
                       await setDoc(doc(db, "players", targetId), { 
                         photoUrl: photoBase64,
                         id: targetId,
                         updatedAt: new Date().toISOString()
                       }, { merge: true });
 
-                      // Sincronizar em user.uid se for diferente
                       if (currentUser?.uid && targetId !== currentUser.uid) {
                         await setDoc(doc(db, "players", currentUser.uid), { 
                           photoUrl: photoBase64,
@@ -134,12 +107,10 @@ const Profile: React.FC<{
                         }, { merge: true }).catch(() => {});
                       }
 
-                      // 2. Atualizar no Firebase Auth
                       if (auth.currentUser) {
                         await updateProfile(auth.currentUser, { photoURL: photoBase64 }).catch(() => {});
                       }
 
-                      // 3. Atualizar no localStorage caso esteja em modo direto
                       const saved = localStorage.getItem('oa_preview_user');
                       if (saved) {
                         try {
@@ -161,31 +132,21 @@ const Profile: React.FC<{
               />
             </div>
 
-            <h3 className="font-headline-sm text-headline-sm text-navy-deep font-bold mt-1 break-words text-center max-w-full">
+            <h3 className="font-headline-sm text-base text-navy-deep font-bold mt-1 break-words text-center max-w-full">
               {player.name}
             </h3>
-            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap justify-center">
-              <span className="font-label-md text-label-md text-primary-container uppercase tracking-wider bg-primary-fixed/40 px-2 py-0.5 rounded-full font-bold">
-                {player.position}
-              </span>
-              <span className="font-label-md text-label-md text-navy-deep uppercase tracking-wider bg-surface-container px-2 py-0.5 rounded-full font-semibold">
-                {player.playerType || 'AVULSO'}
-              </span>
-              {isAdm && (
-                <span className="font-label-md text-label-md text-on-primary uppercase tracking-wider bg-navy-deep px-2 py-0.5 rounded-full font-bold">
-                  DIRETORIA
-                </span>
-              )}
-            </div>
+            <span className="text-xs text-outline font-medium mt-0.5">
+              {player.position}{isAdm ? ` • ${player.playerType === 'mensalista' ? 'Mensalista VIP' : 'Avulso'}` : ''}
+            </span>
 
-            <div className="grid grid-cols-2 gap-2 w-full pt-4 mt-3 border-t border-surface-container-high/40">
-               <div className="bg-surface-container-low rounded-xl p-3 text-center">
-                  <span className="font-label-md text-label-md text-outline uppercase block">GOLS</span>
-                  <span className="font-scoreboard-num text-[36px] text-navy-deep leading-none">{player.goals || 0}</span>
+            <div className="grid grid-cols-2 gap-2 w-full pt-3 mt-3 border-t border-surface-container-high/40">
+               <div className="bg-surface-container-low rounded-xl p-2.5 text-center">
+                  <span className="text-[10px] font-bold text-outline uppercase block">GOLS</span>
+                  <span className="font-scoreboard-num text-3xl text-navy-deep leading-none">{player.goals || 0}</span>
                </div>
-               <div className="bg-primary-fixed/20 rounded-xl p-3 text-center">
-                  <span className="font-label-md text-label-md text-primary-container uppercase block">ASSISTS</span>
-                  <span className="font-scoreboard-num text-[36px] text-primary-container leading-none">{player.assists || 0}</span>
+               <div className="bg-primary-fixed/20 rounded-xl p-2.5 text-center">
+                  <span className="text-[10px] font-bold text-primary-container uppercase block">ASSISTS</span>
+                  <span className="font-scoreboard-num text-3xl text-primary-container leading-none">{player.assists || 0}</span>
                </div>
             </div>
           </div>

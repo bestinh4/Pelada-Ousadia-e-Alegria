@@ -45,4 +45,14 @@ export interface MatchSession {
   reserves?: string[]; // Atletas suplentes / excedentes além dos 24 de linha e 4 goleiros
   matchCount?: number;
   peladaStartedAt?: number;
+  finishedAt?: number;
+  summary?: {
+    participatedIds: string[];
+    noShowIds: string[];
+    finedIds?: string[];
+    exemptNoShowIds?: string[];
+    fineAmount?: number;
+    totalMatches: number;
+    finishedAt: string;
+  };
 }

@@ -30,6 +30,10 @@ export interface Player {
   suplenteNextMatch?: boolean;
   courtCheckIn?: boolean;
   hasLateRemovalFine?: boolean;
+  hasNoShowFine?: boolean;
+  fineAmount?: number;
+  fineReason?: string;
+  lastParticipatedAt?: string;
 }
 
 export interface Expense {

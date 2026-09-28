@@ -27,16 +27,23 @@ const Dashboard: React.FC<DashboardProps> = ({
       const cached = localStorage.getItem('oa_real_finance_cache');
       if (cached) {
         const parsed = JSON.parse(cached);
-        return { mensalista: parsed.mensalista ?? 60, avulso: parsed.avulso ?? 40 };
+        return {
+          mensalista: parsed.mensalista ?? 60,
+          avulso: parsed.avulso ?? 40,
+          multa: parsed.multa ?? 20
+        };
       }
     } catch {}
-    return { mensalista: 60, avulso: 40 };
+    return { mensalista: 60, avulso: 40, multa: 20 };
   });
 
   // Admin Quick Actions states
   const [isReleasingList, setIsReleasingList] = useState(false);
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isEditingPrices, setIsEditingPrices] = useState(false);
+  const [priceForm, setPriceForm] = useState({ mensalista: 60, avulso: 40, multa: 20 });
+  const [isSavingPrices, setIsSavingPrices] = useState(false);
   const [newPlayerData, setNewPlayerData] = useState({
     name: '',
     position: 'Atacante',
@@ -49,14 +56,43 @@ const Dashboard: React.FC<DashboardProps> = ({
     const unsubPrices = onSnapshot(doc(db, "settings", "finance"), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as any;
-        setPrices(data);
+        const normalized = {
+          mensalista: Number(data.mensalista) || 60,
+          avulso: Number(data.avulso) || 40,
+          multa: Number(data.multa) || 20
+        };
+        setPrices(normalized);
+        setPriceForm(normalized);
         try {
-          localStorage.setItem('oa_real_finance_cache', JSON.stringify(data));
+          localStorage.setItem('oa_real_finance_cache', JSON.stringify(normalized));
         } catch {}
       }
     });
     return () => unsubPrices();
   }, []);
+
+  const handleSaveFinancePrices = async () => {
+    if (!isCurrentUserAdmin) return;
+    setIsSavingPrices(true);
+    try {
+      const payload = {
+        mensalista: Math.max(0, Number(priceForm.mensalista) || 0),
+        avulso: Math.max(0, Number(priceForm.avulso) || 0),
+        multa: Math.max(0, Number(priceForm.multa) || 0),
+        updatedAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, "settings", "finance"), payload, { merge: true });
+      if (match?.id) {
+        await updateDoc(doc(db, "matches", match.id), { price: payload.avulso }).catch(() => {});
+      }
+      setIsEditingPrices(false);
+      alert("Valores de Mensalista, Avulso e Multa atualizados com sucesso!");
+    } catch {
+      alert("Erro ao salvar valores.");
+    } finally {
+      setIsSavingPrices(false);
+    }
+  };
 
   // Presença do atleta atual
   const currentPlayer = players.find(p => 
@@ -126,6 +162,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           }).catch(() => {});
 
           updates.hasLateRemovalFine = true;
+          updates.fineAmount = prices.multa || 20;
           updates.suplenteNextMatch = true;
         }
       }
@@ -226,181 +263,152 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   return (
-    <div className="flex flex-col w-full max-w-2xl mx-auto px-margin pb-space-xl gap-space-md animate-fade-in">
-      {/* PAINEL DA DIRETORIA (AÇÕES EXCLUSIVAS PARA O ADMINISTRADOR NA PÁGINA INICIAL) */}
+    <div className="flex flex-col w-full max-w-3xl mx-auto pb-6 gap-4 animate-fade-in">
+      {/* PAINEL DA DIRETORIA (EXCLUSIVO PARA ADMINISTRADORES) */}
       {isCurrentUserAdmin && (
-        <div className="relative w-full rounded-2xl bg-surface-container-lowest p-4 shadow-sm border border-primary-container/30 overflow-hidden">
-          <div className="flex items-center justify-between gap-2 pb-3 border-b border-surface-container-high/50 flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-primary-container/15 text-primary-container flex items-center justify-center font-bold">
-                <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
-              </div>
-              <div>
-                <h3 className="font-headline-sm text-sm font-bold text-navy-deep leading-tight">
-                  Painel da Diretoria
-                </h3>
-                <span className="text-[11px] text-outline">
-                  Ações rápidas de gestão da pelada
-                </span>
-              </div>
+        <div className="w-full rounded-2xl bg-surface-container-lowest p-3.5 sm:p-4 shadow-sm border border-primary-container/25">
+          <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-surface-container-high/50 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="material-symbols-outlined text-primary-container text-[20px] shrink-0">admin_panel_settings</span>
+              <h3 className="font-headline-sm text-sm font-bold text-navy-deep truncate">
+                Painel da Diretoria
+              </h3>
             </div>
-
-            <span className="bg-primary-fixed text-primary-container font-label-md text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">
-              DIRETOR
-            </span>
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-navy-deep bg-surface-container px-2.5 py-1 rounded-lg">
+              <span>Mensal: R$ {prices.mensalista}</span>
+              <span className="text-outline">·</span>
+              <span>Avulso: R$ {prices.avulso}</span>
+              <span className="text-outline">·</span>
+              <span className="text-red-700">Multa: R$ {prices.multa}</span>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-3">
             {/* BOTÃO 1: ABRIR LISTA DA PRÓXIMA PELADA */}
             <button
               onClick={handleReleaseNextPelada}
               disabled={isReleasingList}
-              className="py-3 px-3.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all disabled:opacity-50"
+              className="min-h-[44px] py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all disabled:opacity-50"
               title="Liberar lista da próxima pelada: confirma mensalistas automaticamente e penaliza quem faltou"
             >
-              <span className="material-symbols-outlined text-[20px]">rule_folder</span>
-              <span>{isReleasingList ? 'LIBERANDO LISTA...' : 'ABRIR LISTA PRÓXIMA PELADA'}</span>
+              <span className="material-symbols-outlined text-[18px] shrink-0">rule_folder</span>
+              <span className="truncate">{isReleasingList ? 'LIBERANDO...' : 'ABRIR PRÓXIMA LISTA'}</span>
             </button>
 
             {/* BOTÃO 2: CADASTRAR NOVO ATLETA */}
             <button
               onClick={() => setIsAddingManual(true)}
-              className="py-3 px-3.5 bg-gradient-to-r from-primary-container to-primary-bright hover:opacity-95 text-on-primary rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+              className="min-h-[44px] py-2.5 px-3 bg-gradient-to-r from-primary-container to-primary-bright hover:opacity-95 text-on-primary rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
               title="Cadastrar novo atleta manualmente no sistema"
             >
-              <span className="material-symbols-outlined text-[20px]">person_add</span>
-              <span>CADASTRAR NOVO ATLETA</span>
+              <span className="material-symbols-outlined text-[18px] shrink-0">person_add</span>
+              <span className="truncate">CADASTRAR ATLETA</span>
+            </button>
+
+            {/* BOTÃO 3: DEFINIR VALORES (AVULSO, MENSALISTA E MULTA) */}
+            <button
+              onClick={() => {
+                setPriceForm(prices);
+                setIsEditingPrices(true);
+              }}
+              className="min-h-[44px] py-2.5 px-3 bg-navy-deep hover:opacity-95 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+              title="Definir valores de Avulsos, Mensalistas e Multas"
+            >
+              <span className="material-symbols-outlined text-[18px] shrink-0">payments</span>
+              <span className="truncate">DEFINIR VALORES</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* MATCH INFORMATION CARD & ATTENDANCE CONFIRMATION */}
-      <div className="relative w-full rounded-2xl bg-surface-container-lowest p-space-md shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40 transition-all">
-        {/* Stadium Aura Decoration */}
-        <div className="absolute -right-12 -top-12 w-44 h-44 rounded-full bg-primary-container/10 blur-2xl pointer-events-none animate-pulse-slow"></div>
-        <div className="absolute -left-12 -bottom-12 w-36 h-36 rounded-full bg-secondary/10 blur-2xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex flex-col gap-space-sm">
-          {/* Header Row: Title & Subtitle + Match Type Badge */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center shrink-0 border border-primary-container/20">
-                <span className="material-symbols-outlined text-[22px]">sports_soccer</span>
-              </div>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-primary-container animate-ping shrink-0"></span>
-                  <span className="font-headline-sm text-headline-sm text-navy-deep font-bold truncate">
-                    Convocação Oficial
-                  </span>
-                </div>
-                <span className="font-body-sm text-body-sm text-outline truncate">
-                  Confirmação de Presença
-                </span>
-              </div>
-            </div>
-
-            <span className="bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold shrink-0">
-              {match?.type || 'Mini-Campo'}
-            </span>
-          </div>
-
-          {/* SOCCER FIELD BANNER IMAGE (Limpa e alinhada) */}
-          <div className="relative w-full h-40 sm:h-48 overflow-hidden rounded-xl bg-navy-deep mt-1 shadow-xs border border-surface-container-high/40">
+      {/* CARD PRINCIPAL DA PELADA & CONFIRMAÇÃO DE PRESENÇA */}
+      <div className="relative w-full rounded-2xl bg-surface-container-lowest p-4 sm:p-5 shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40">
+        <div className="relative z-10 flex flex-col gap-3.5">
+          {/* Imagem do Campo com Informações Integradas */}
+          <div className="relative w-full h-40 sm:h-52 overflow-hidden rounded-xl bg-navy-deep shadow-xs border border-surface-container-high/40">
             <img 
               src={match?.fieldImageUrl || "https://images.unsplash.com/photo-1574629810360-7efbbe195018?auto=format&fit=crop&w=1200&q=80"}
               alt="Campo de Futebol"
               className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-navy-deep/60 via-transparent to-black/20"></div>
-          </div>
+            <div className="absolute inset-0 bg-gradient-to-t from-navy-deep/90 via-navy-deep/30 to-black/20"></div>
 
-          {/* DETALHES TÉCNICOS: NOME DA GRANJA LOGO ACIMA DA DATA */}
-          <div className="flex flex-col gap-2.5 bg-surface-container-low p-3.5 sm:p-4 rounded-xl border border-surface-container-high/60 shadow-xs">
-            {/* Linha 1: Nome da Granja / Local e Valor Avulso */}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="material-symbols-outlined text-secondary text-[22px] shrink-0">location_on</span>
-                <span className="font-headline-sm text-headline-sm text-navy-deep font-bold truncate">
-                  {displayLocation}
+            {/* Badge de Modalidade no Topo da Imagem */}
+            <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 bg-navy-deep/80 backdrop-blur-md text-white text-[11px] font-bold px-2.5 py-1 rounded-lg border border-white/15">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                Convocação Oficial
+              </span>
+              {isCurrentUserAdmin && (
+                <span className="bg-white/90 backdrop-blur-md text-navy-deep font-label-md text-[11px] px-2.5 py-1 rounded-lg font-bold">
+                  Avulso: R$ {prices.avulso},00
                 </span>
-              </div>
-              <div className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-gradient-to-r from-primary-container to-primary-bright text-on-primary shadow-xs shrink-0">
-                <span className="text-[10px] uppercase tracking-wider font-semibold opacity-90">Avulso:</span>
-                <span className="font-headline-sm text-headline-sm whitespace-nowrap">R$ {match?.price || prices.avulso},00</span>
-              </div>
+              )}
             </div>
 
-            {/* Linha 2: Data e Horário (logo abaixo do nome da granja) */}
-            <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-surface-container-high/50 text-on-surface-variant font-body-sm text-body-sm flex-wrap sm:flex-nowrap">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="material-symbols-outlined text-outline text-[18px] shrink-0">event</span>
-                <span className="font-semibold text-navy-deep break-words">
-                  {match?.date ? new Date(match.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : '15 de Fevereiro, 2026'}
-                </span>
+            {/* Local, Data e Horário na Base da Imagem */}
+            <div className="absolute bottom-3 left-3 right-3 flex flex-col sm:flex-row sm:items-end justify-between gap-1.5 text-white">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-amber-400 text-[20px] shrink-0">location_on</span>
+                  <h2 className="font-headline-sm text-base sm:text-lg font-bold truncate">
+                    {displayLocation}
+                  </h2>
+                </div>
+                <p className="text-xs text-white/85 pl-6 truncate">
+                  {match?.date ? new Date(match.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : 'Sábado'}
+                </p>
               </div>
 
-              <div className="flex items-center gap-1.5 font-semibold text-navy-deep shrink-0 whitespace-nowrap">
-                <span className="material-symbols-outlined text-primary-container text-[18px]">schedule</span>
-                <span>Início: <strong className="text-primary-container">{match?.time || '20:00'}</strong></span>
+              <div className="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-bold self-start sm:self-auto shrink-0 border border-white/15">
+                <span className="material-symbols-outlined text-amber-300 text-[16px]">schedule</span>
+                <span>Início: {match?.time || '20:00'}</span>
               </div>
             </div>
           </div>
 
           {/* ÁREA DE CONFIRMAÇÃO DE PRESENÇA (RSVP) */}
-          <div className="pt-0.5">
+          <div>
             {isConfirmed ? (
-              /* CARD DE CONFIRMADO */
-              <div className="p-3.5 sm:p-4 rounded-xl bg-tertiary-container/10 border border-tertiary-container/30 flex flex-col gap-2.5 animate-fade-in">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-tertiary-container text-on-tertiary flex items-center justify-center shadow-xs shrink-0">
-                    <span className="material-symbols-outlined text-[20px]">check_circle</span>
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="font-headline-sm text-headline-sm font-bold text-navy-deep leading-tight">
-                      Presença Confirmada!
-                    </h3>
-                    <p className="font-body-sm text-body-sm text-outline leading-tight mt-0.5">
-                      Você está na lista oficial para o jogo.
-                    </p>
+              <div className="p-3.5 sm:p-4 rounded-xl bg-tertiary-container/10 border border-tertiary-container/30 flex flex-col gap-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-tertiary-container text-on-tertiary flex items-center justify-center shadow-xs shrink-0">
+                      <span className="material-symbols-outlined text-[20px]">check_circle</span>
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-headline-sm text-sm sm:text-base font-bold text-navy-deep leading-tight">
+                        Presença Confirmada
+                      </h3>
+                      <p className="font-body-sm text-xs text-outline leading-tight mt-0.5">
+                        Prazo limite para retirada: até 18h da véspera ({checkLateRemovalDeadline(match).formattedDeadline})
+                      </p>
+                    </div>
                   </div>
                 </div>
 
                 <button
                   onClick={() => updatePresence('ausente')}
                   disabled={isUpdating}
-                  className="w-full mt-0.5 py-2.5 min-h-[44px] px-3 rounded-xl font-label-md text-label-md font-semibold text-outline hover:text-error hover:bg-error/10 border border-surface-container-high active:scale-[0.98] transition-all touch-manipulation flex items-center justify-center gap-1.5"
+                  className="w-full min-h-[44px] py-2.5 px-3 rounded-xl font-label-md text-xs font-semibold text-outline hover:text-error hover:bg-error/10 border border-surface-container-high active:scale-[0.98] transition-all touch-manipulation flex items-center justify-center gap-1.5"
                 >
                   <span className="material-symbols-outlined text-[18px]">event_busy</span>
                   <span>Não poderei comparecer (Desmarcar)</span>
                 </button>
-
-                <div className="flex items-center gap-1.5 text-[11px] text-outline justify-center text-center px-1">
-                  <span className="material-symbols-outlined text-[15px] text-amber-600 shrink-0">schedule</span>
-                  <span>Prazo sem multa: até 18h da véspera ({checkLateRemovalDeadline(match).formattedDeadline})</span>
-                </div>
-
-                {currentPlayer?.hasLateRemovalFine && (
-                  <div className="p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-900 flex items-center gap-2 text-xs font-semibold mt-1">
-                    <span className="material-symbols-outlined text-[18px] text-amber-700 shrink-0">info</span>
-                    <span>Você possui pendência de multa por retirada de nome após as 18h da véspera. A Diretoria comunicará o valor a ser pago.</span>
-                  </div>
-                )}
               </div>
             ) : isRefused ? (
-              /* CARD DE AUSENTE */
-              <div className="p-3.5 sm:p-4 rounded-xl bg-surface-container-low border border-surface-container-high/60 flex flex-col gap-2.5 animate-fade-in">
+              <div className="p-3.5 sm:p-4 rounded-xl bg-surface-container-low border border-surface-container-high/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-error/10 text-error flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-[20px]">cancel</span>
                   </div>
-                  <div className="min-w-0">
-                    <h3 className="font-headline-sm text-headline-sm font-bold text-navy-deep leading-tight">
+                  <div>
+                    <h3 className="font-headline-sm text-sm font-bold text-navy-deep leading-tight">
                       Você marcou ausência
                     </h3>
-                    <p className="font-body-sm text-body-sm text-outline leading-tight mt-0.5">
-                      Mudou de ideia? Ainda dá tempo de jogar!
+                    <p className="font-body-sm text-xs text-outline mt-0.5">
+                      Mudou de ideia? Confirme para entrar na lista.
                     </p>
                   </div>
                 </div>
@@ -408,37 +416,121 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <button
                   onClick={() => updatePresence('presente')}
                   disabled={isUpdating}
-                  className="w-full mt-0.5 py-3.5 min-h-[48px] px-4 rounded-xl font-headline-sm text-headline-sm font-bold bg-gradient-to-r from-primary-container to-primary-bright text-on-primary shadow-md active:scale-[0.98] transition-all touch-manipulation flex items-center justify-center gap-2"
+                  className="min-h-[44px] py-2.5 px-4 rounded-xl font-headline-sm text-xs font-bold bg-gradient-to-r from-primary-container to-primary-bright text-on-primary shadow-sm active:scale-[0.98] transition-all touch-manipulation flex items-center justify-center gap-2 shrink-0"
                 >
-                  <span className="material-symbols-outlined text-[20px]">sports_soccer</span>
-                  <span>Confirmar Minha Presença</span>
+                  <span className="material-symbols-outlined text-[18px]">sports_soccer</span>
+                  <span>Confirmar Presença</span>
                 </button>
               </div>
             ) : (
-              /* BOTÕES DE ESCOLHA (PENDENTE) */
-              <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <button
                   onClick={() => updatePresence('presente')}
                   disabled={isUpdating}
-                  className="w-full py-3.5 min-h-[50px] px-4 rounded-xl font-headline-sm text-headline-sm font-bold bg-gradient-to-r from-primary-container to-primary-bright text-on-primary shadow-md shadow-primary/25 hover:opacity-95 active:scale-[0.98] transition-all touch-manipulation flex items-center justify-center gap-2"
+                  className="sm:col-span-2 min-h-[48px] py-3 px-4 rounded-xl font-headline-sm text-sm font-bold bg-gradient-to-r from-primary-container to-primary-bright text-on-primary shadow-md shadow-primary/20 hover:opacity-95 active:scale-[0.98] transition-all touch-manipulation flex items-center justify-center gap-2"
                 >
-                  <span className="material-symbols-outlined text-[22px]">sports_soccer</span>
+                  <span className="material-symbols-outlined text-[20px]">sports_soccer</span>
                   <span>Confirmar Presença</span>
                 </button>
 
                 <button
                   onClick={() => updatePresence('ausente')}
                   disabled={isUpdating}
-                  className="w-full py-2.5 min-h-[44px] px-3 rounded-xl font-label-md text-label-md font-semibold text-outline hover:text-navy-deep hover:bg-surface-container-low transition-all active:scale-[0.98] touch-manipulation flex items-center justify-center gap-1.5"
+                  className="min-h-[48px] py-2.5 px-3 rounded-xl font-label-md text-xs font-semibold text-outline hover:text-navy-deep bg-surface-container-low hover:bg-surface-container transition-all active:scale-[0.98] touch-manipulation flex items-center justify-center gap-1.5 border border-surface-container-high/50"
                 >
                   <span className="material-symbols-outlined text-[18px]">close</span>
-                  <span>Não vou poder ir</span>
+                  <span>Não vou ir</span>
                 </button>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* MODAL: DEFINIR VALORES DE AVULSOS, MENSALISTAS E MULTAS (DIRETORIA) */}
+      {isEditingPrices && isCurrentUserAdmin && (
+        <div className="fixed inset-0 z-50 bg-navy-deep/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface-container-lowest max-w-md w-full rounded-2xl p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 animate-pop-in">
+            <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary-container text-[22px]">payments</span>
+                <div>
+                  <h3 className="font-headline-sm text-base text-navy-deep font-bold">
+                    Definir Valores & Multas
+                  </h3>
+                  <p className="text-xs text-outline">Configuração exclusiva da Diretoria</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsEditingPrices(false)}
+                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <label className="font-label-md text-xs text-navy-deep font-bold block mb-1">
+                  Valor Mensalista (R$)
+                </label>
+                <input 
+                  type="number" 
+                  min="0"
+                  value={priceForm.mensalista}
+                  onChange={(e) => setPriceForm({ ...priceForm, mensalista: Number(e.target.value) })}
+                  className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="font-label-md text-xs text-navy-deep font-bold block mb-1">
+                  Valor Avulso por Jogo (R$)
+                </label>
+                <input 
+                  type="number" 
+                  min="0"
+                  value={priceForm.avulso}
+                  onChange={(e) => setPriceForm({ ...priceForm, avulso: Number(e.target.value) })}
+                  className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="font-label-md text-xs text-red-700 font-bold block mb-1">
+                  Valor da Multa por Falta / Atraso (R$)
+                </label>
+                <input 
+                  type="number" 
+                  min="0"
+                  value={priceForm.multa}
+                  onChange={(e) => setPriceForm({ ...priceForm, multa: Number(e.target.value) })}
+                  className="w-full h-11 px-3 rounded-xl bg-red-50/50 border border-red-300 outline-none font-body-md text-red-900 font-bold"
+                />
+                <span className="text-[11px] text-outline mt-1 block">
+                  Aplicado automaticamente a quem colocar o nome na lista e faltar à pelada ou retirar após as 18h.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-surface-container-high/40">
+              <button 
+                onClick={() => setIsEditingPrices(false)}
+                className="px-4 py-2 rounded-xl bg-surface-container-high text-on-surface font-label-md text-xs font-bold"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleSaveFinancePrices}
+                disabled={isSavingPrices}
+                className="px-5 py-2 rounded-xl bg-primary-container text-on-primary font-headline-sm text-xs font-bold shadow-md active:scale-95 disabled:opacity-50"
+              >
+                {isSavingPrices ? 'Salvando...' : 'Salvar Valores'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL PARA CADASTRAR NOVO ATLETA (ADMIN) */}
       {isAddingManual && (

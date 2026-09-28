@@ -46,53 +46,30 @@ const CreateMatch: React.FC<CreateMatchProps> = ({ user, onPageChange }) => {
   };
 
   return (
-    <div className="flex flex-col w-full max-w-2xl mx-auto px-margin pb-space-xl gap-space-md animate-fade-in">
-      {/* HEADER CARD */}
-      <div className="relative w-full rounded-2xl bg-surface-container-lowest p-space-md shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40 transition-all">
-        {/* Stadium Aura Decoration */}
-        <div className="absolute -right-12 -top-12 w-44 h-44 rounded-full bg-primary-container/10 blur-2xl pointer-events-none animate-pulse-slow"></div>
-        <div className="absolute -left-12 -bottom-12 w-36 h-36 rounded-full bg-secondary/10 blur-2xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex flex-col gap-space-sm">
-          {/* Header Row */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={() => onPageChange(Page.Dashboard)} 
-                className="w-10 h-10 rounded-xl bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-navy-deep active:scale-95 transition-all shadow-xs shrink-0"
-                title="Voltar ao Início"
-              >
-                <span className="material-symbols-outlined text-[20px]">arrow_back</span>
-              </button>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
-                  <span className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                    Nova Convocação de Pelada
-                  </span>
-                </div>
-                <span className="font-body-sm text-body-sm text-outline">
-                  Configure a data, local e vagas para abrir a lista
-                </span>
-              </div>
-            </div>
-
-            <span className="bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">
-              DIRETORIA O&A
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <main className="grid grid-cols-1 lg:grid-cols-12 gap-space-md items-start w-full">
+    <div className="flex flex-col w-full max-w-3xl mx-auto pb-6 gap-4 animate-fade-in">
+      <main className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start w-full">
         {/* Form Column */}
-        <div className="lg:col-span-7 flex flex-col gap-space-sm">
-          <div className="bg-surface-container-lowest rounded-2xl p-space-md border border-surface-container-high/40 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-surface-container-high/40">
-              <span className="material-symbols-outlined text-secondary text-[20px]">edit_calendar</span>
-              <h3 className="font-label-caps text-label-caps text-navy-deep uppercase tracking-wider">
-                DADOS DO JOGO
-              </h3>
+        <div className="lg:col-span-7 flex flex-col gap-4">
+          <div className="bg-surface-container-lowest rounded-2xl p-4 sm:p-5 border border-surface-container-high/50 shadow-xs space-y-4">
+            <div className="flex items-center justify-between gap-2 pb-3 border-b border-surface-container-high/40">
+              <div className="flex items-center gap-2.5">
+                <button 
+                  onClick={() => onPageChange(Page.Dashboard)} 
+                  className="w-9 h-9 rounded-xl bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-navy-deep active:scale-95 transition-all shrink-0"
+                  title="Voltar ao Início"
+                >
+                  <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+                </button>
+                <div>
+                  <h3 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold">
+                    DADOS DA NOVA PELADA
+                  </h3>
+                  <p className="text-xs text-outline">Configure local, data e vagas</p>
+                </div>
+              </div>
+              <span className="bg-secondary-fixed text-on-secondary-fixed text-[10px] px-2.5 py-1 rounded-full uppercase font-bold">
+                DIRETORIA
+              </span>
             </div>
 
             <div className="space-y-1">

@@ -13,7 +13,7 @@ interface PlayerListProps {
 
 const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, onPageChange }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'confirmed' | 'goalkeeper' | 'monthly' | 'guest'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'confirmed' | 'waiting' | 'goalkeeper' | 'monthly' | 'guest'>('all');
   const [selectedPlayerForStats, setSelectedPlayerForStats] = useState<Player | null>(null);
   const [statsData, setStatsData] = useState({ 
     name: '',
@@ -140,18 +140,22 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
   const waitingList = [...waitingGKs, ...waitingField];
   const remainingSlots = Math.max(0, totalSlots - confirmed.length);
 
+  // Para atletas comuns, exibir apenas os atletas confirmados (Titulares + Suplentes), ocultando quem está pendente ou ausente
+  const visibleBasePlayers = isCurrentUserAdmin ? players : sortedPresent;
+
   // Filtro
-  const filteredPlayers = players.filter(p => {
+  const filteredPlayers = visibleBasePlayers.filter(p => {
     const safeName = (p.name || '').toLowerCase();
     const safePos = (p.position || '').toLowerCase();
     const q = searchQuery.toLowerCase();
     const matchesSearch = safeName.includes(q) || safePos.includes(q);
     if (!matchesSearch) return false;
 
-    if (selectedFilter === 'confirmed') return p.status === 'presente';
+    if (selectedFilter === 'confirmed') return confirmed.some(c => c.id === p.id);
+    if (selectedFilter === 'waiting') return waitingList.some(w => w.id === p.id);
     if (selectedFilter === 'goalkeeper') return p.position === 'Goleiro';
-    if (selectedFilter === 'monthly') return p.playerType === 'mensalista';
-    if (selectedFilter === 'guest') return p.playerType === 'avulso';
+    if (isCurrentUserAdmin && selectedFilter === 'monthly') return p.playerType === 'mensalista';
+    if (isCurrentUserAdmin && selectedFilter === 'guest') return p.playerType === 'avulso';
     return true;
   });
 
@@ -165,15 +169,11 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
     text += `*CONFIRMADOS (${confirmed.length}/${totalSlots}):*\n`;
     
     confirmedGKs.forEach((p, idx) => {
-      const isMensalista = p.playerType === 'mensalista';
-      const tag = isMensalista ? ' [MENSALISTA]' : '';
-      text += `${String(idx + 1).padStart(2, '0')}. ${p.name} (GK) [${p.goals || 0}G]${tag}\n`;
+      text += `${String(idx + 1).padStart(2, '0')}. ${p.name} (GK) [${p.goals || 0}G]\n`;
     });
 
     confirmedField.forEach((p, idx) => {
-      const isMensalista = p.playerType === 'mensalista';
-      const tag = isMensalista ? ' [MENSALISTA]' : '';
-      text += `${String(confirmedGKs.length + idx + 1).padStart(2, '0')}. ${p.name} [${p.goals || 0}G]${tag}\n`;
+      text += `${String(confirmedGKs.length + idx + 1).padStart(2, '0')}. ${p.name} [${p.goals || 0}G]\n`;
     });
 
     if (waitingList.length > 0) {
@@ -200,6 +200,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
     try {
       await updateDoc(doc(db, "players", playerId), {
         status: 'presente',
+        suplenteNextMatch: false,
         confirmedAt: new Date().toISOString()
       });
     } catch (e) {
@@ -246,193 +247,168 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
   };
 
   return (
-    <div className="flex flex-col w-full max-w-2xl mx-auto px-margin pb-space-xl gap-space-md animate-fade-in">
-      {/* SUMMARY BANNER */}
-      <div className="relative w-full rounded-2xl bg-surface-container-lowest p-space-md shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40 transition-all">
-        {/* Stadium Aura Decoration */}
-        <div className="absolute -right-12 -top-12 w-44 h-44 rounded-full bg-primary-container/10 blur-2xl pointer-events-none animate-pulse-slow"></div>
-        <div className="absolute -left-12 -bottom-12 w-36 h-36 rounded-full bg-secondary/10 blur-2xl pointer-events-none"></div>
-
-        <div className="relative z-10 flex flex-col gap-space-sm">
-          {/* Header Row: Title + Logo Badge */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="w-10 h-10 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center shrink-0 border border-primary-container/20">
-                <span className="material-symbols-outlined text-[22px]">groups</span>
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
-                  <span className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                    {match ? `Pelada • ${match.time || '20h00'}` : 'Pelada de Sábado • 20h00'}
-                  </span>
-                </div>
-                <span className="font-body-sm text-body-sm text-outline">
-                  Lista Oficial de Convocados
-                </span>
-              </div>
+    <div className="flex flex-col w-full max-w-4xl mx-auto pb-6 gap-4 animate-fade-in">
+      {/* PAINEL DE OCUPAÇÃO E COMPARTILHAMENTO */}
+      <div className="w-full rounded-2xl bg-surface-container-lowest p-4 sm:p-5 shadow-[0_12px_36px_rgba(0,58,117,0.06)] border border-surface-container-high/40 flex flex-col gap-3.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center shrink-0 border border-primary-container/20">
+              <span className="material-symbols-outlined text-[22px]">groups</span>
             </div>
+            <div className="min-w-0">
+              <h2 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold truncate">
+                Lista Oficial • {confirmed.length}/{totalSlots} Titulares
+              </h2>
+              <p className="font-body-sm text-xs text-outline truncate">
+                {remainingSlots === 0 
+                  ? 'Vagas titulares completas • Novos confirmados entram na suplência'
+                  : `Restam ${remainingSlots} vagas para fechar as 5 equipes`}
+              </p>
+            </div>
+          </div>
 
-            <span className="bg-secondary-fixed text-on-secondary-fixed font-label-md text-label-md px-2.5 py-1 rounded-full uppercase tracking-wider font-semibold">
-              {match?.location ? match.location.toUpperCase() : 'GRANJA CANTINHO DO CÉU'}
+          <button 
+            onClick={handleShareRoster}
+            className="min-h-[40px] py-2 px-3.5 rounded-xl bg-tertiary hover:opacity-95 text-on-tertiary font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0"
+          >
+            <span className="material-symbols-outlined text-[18px]">share</span>
+            <span>{copiedFeedback ? 'COPIADO!' : 'ZAP DA LISTA'}</span>
+          </button>
+        </div>
+
+        {/* Barra de Progresso */}
+        <div className="w-full h-2 bg-surface-container rounded-full overflow-hidden">
+          <div 
+            className="h-full rounded-full bg-gradient-to-r from-navy-deep via-secondary to-primary-container transition-all duration-500" 
+            style={{ width: `${Math.min(100, (confirmed.length / totalSlots) * 100)}%` }}
+          ></div>
+        </div>
+
+        {/* 3 Indicadores Rápidos */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-surface-container-low text-center border border-surface-container-high/40">
+            <span className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold tabular-nums">
+              {confirmedField.length}/{fieldSlots}
+            </span>
+            <span className="text-[11px] text-on-surface-variant font-medium">
+              Linha
             </span>
           </div>
 
-          {/* Capacity Counter */}
-          <div className="flex flex-col gap-1.5 mt-1">
-            <div className="flex justify-between items-baseline">
-              <span className="font-label-caps text-label-caps text-on-surface-variant tracking-wider">
-                OCUPAÇÃO TOTAL
-              </span>
-              <div className="flex items-baseline gap-1">
-                <span className="font-headline-lg-mobile text-headline-lg-mobile text-primary-container leading-none">
-                  {confirmed.length}
-                </span>
-                <span className="font-body-md text-body-md text-on-surface-variant">
-                  / {totalSlots} convocados
-                </span>
-              </div>
-            </div>
-
-            {/* Progress Track */}
-            <div className="w-full h-2.5 bg-surface-container rounded-full overflow-hidden p-0.5">
-              <div 
-                className="h-full rounded-full bg-gradient-to-r from-navy-deep via-secondary to-primary-container transition-all duration-700" 
-                style={{ width: `${Math.min(100, (confirmed.length / totalSlots) * 100)}%` }}
-              ></div>
-            </div>
-
-            <span className="font-label-md text-label-md text-outline">
-              {remainingSlots === 0 
-                ? 'Lista principal completa! Novos confirmados entram na fila de espera.'
-                : `Faltam ${remainingSlots} vagas para fechar as 5 equipes (30 na linha + 4 goleiros)`}
+          <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-surface-container-low text-center border border-surface-container-high/40">
+            <span className="font-headline-sm text-sm sm:text-base text-primary-container font-bold tabular-nums">
+              {confirmedGKs.length}/{gkSlots}
+            </span>
+            <span className="text-[11px] text-on-surface-variant font-medium">
+              Goleiros
             </span>
           </div>
 
-          {/* Live Metric Pills - Indicadores Exatos */}
-          <div className="grid grid-cols-3 gap-2.5 pt-1.5">
-            <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-surface-container-low text-center border border-surface-container-high/40">
-              <div className="flex items-baseline gap-1">
-                <span className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                  {confirmedField.length}
-                </span>
-                <span className="text-[11px] text-outline font-semibold">
-                  /{fieldSlots}
-                </span>
-              </div>
-              <span className="font-label-md text-label-md text-on-surface-variant font-medium">
-                Linha
-              </span>
-            </div>
-
-            <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-surface-container-low text-center border border-surface-container-high/40">
-              <div className="flex items-baseline gap-1">
-                <span className="font-headline-sm text-headline-sm text-primary-container font-bold">
-                  {confirmedGKs.length}
-                </span>
-                <span className="text-[11px] text-outline font-semibold">
-                  /{gkSlots}
-                </span>
-              </div>
-              <span className="font-label-md text-label-md text-on-surface-variant font-medium">
-                Goleiros
-              </span>
-            </div>
-
-            <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-surface-container-low text-center border border-surface-container-high/40">
-              <span className="font-headline-sm text-headline-sm text-amber-700 font-bold">
-                {waitingList.length}
-              </span>
-              <span className="font-label-md text-label-md text-on-surface-variant font-medium">
-                Suplentes
-              </span>
-            </div>
+          <div className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-surface-container-low text-center border border-surface-container-high/40">
+            <span className="font-headline-sm text-sm sm:text-base text-amber-700 font-bold tabular-nums">
+              {waitingList.length}
+            </span>
+            <span className="text-[11px] text-on-surface-variant font-medium">
+              Suplentes
+            </span>
           </div>
         </div>
       </div>
 
-      {/* SEARCH & TACTICAL FILTERS */}
-      <div className="flex flex-col gap-space-sm">
-        {/* Tactical Search Field */}
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">
-              search
-            </span>
-            <input 
-              type="text" 
-              id="player-search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar por nome, camisa ou posição..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-surface-container-lowest text-on-surface font-body-md text-body-md shadow-sm outline-none placeholder:text-outline focus:bg-canvas-white transition-all border border-surface-container-high/40"
-            />
-          </div>
+      {/* BUSCA E FILTROS */}
+      <div className="flex flex-col gap-2.5">
+        <div className="relative w-full">
+          <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">
+            search
+          </span>
+          <input 
+            type="text" 
+            id="player-search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar atleta por nome ou posição..."
+            className="w-full pl-10 pr-4 py-2.5 min-h-[44px] rounded-xl bg-surface-container-lowest text-on-surface font-body-md text-sm shadow-xs outline-none placeholder:text-outline focus:bg-canvas-white transition-all border border-surface-container-high/50"
+          />
         </div>
 
-        {/* Filter Pills (Scrollable) */}
-        <div className="flex gap-2 overflow-x-auto no-scrollbar py-0.5">
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5">
           <button 
             onClick={() => setSelectedFilter('all')}
-            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full font-label-md text-label-md transition-all active:scale-95 shadow-sm ${
+            className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
               selectedFilter === 'all' 
-                ? 'bg-navy-deep text-on-secondary' 
-                : 'bg-surface-container-lowest text-navy-deep hover:bg-surface-container-high'
+                ? 'bg-navy-deep text-on-secondary shadow-xs' 
+                : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
             }`}
           >
-            Todos ({players.length})
+            {isCurrentUserAdmin ? `Todos (${players.length})` : `Confirmados (${sortedPresent.length})`}
           </button>
           <button 
             onClick={() => setSelectedFilter('confirmed')}
-            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full font-label-md text-label-md transition-all active:scale-95 shadow-sm ${
+            className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
               selectedFilter === 'confirmed' 
-                ? 'bg-navy-deep text-on-secondary' 
-                : 'bg-surface-container-lowest text-navy-deep hover:bg-surface-container-high'
+                ? 'bg-navy-deep text-on-secondary shadow-xs' 
+                : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
             }`}
           >
-            Confirmados ({confirmed.length})
+            Titulares ({confirmed.length})
           </button>
+          {waitingList.length > 0 && (
+            <button 
+              onClick={() => setSelectedFilter('waiting')}
+              className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
+                selectedFilter === 'waiting' 
+                  ? 'bg-amber-600 text-white shadow-xs' 
+                  : 'bg-amber-50 text-amber-900 border border-amber-300/60'
+              }`}
+            >
+              Suplentes ({waitingList.length})
+            </button>
+          )}
           <button 
             onClick={() => setSelectedFilter('goalkeeper')}
-            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full font-label-md text-label-md transition-all active:scale-95 shadow-sm ${
+            className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
               selectedFilter === 'goalkeeper' 
-                ? 'bg-navy-deep text-on-secondary' 
-                : 'bg-surface-container-lowest text-navy-deep hover:bg-surface-container-high'
+                ? 'bg-navy-deep text-on-secondary shadow-xs' 
+                : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
             }`}
           >
-            Goleiros ({players.filter(p => p.position === 'Goleiro').length})
+            Goleiros ({visibleBasePlayers.filter(p => p.position === 'Goleiro').length})
           </button>
-          <button 
-            onClick={() => setSelectedFilter('monthly')}
-            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full font-label-md text-label-md transition-all active:scale-95 shadow-sm ${
-              selectedFilter === 'monthly' 
-                ? 'bg-navy-deep text-on-secondary' 
-                : 'bg-surface-container-lowest text-navy-deep hover:bg-surface-container-high'
-            }`}
-          >
-            Mensalistas
-          </button>
-          <button 
-            onClick={() => setSelectedFilter('guest')}
-            className={`whitespace-nowrap px-3.5 py-1.5 rounded-full font-label-md text-label-md transition-all active:scale-95 shadow-sm ${
-              selectedFilter === 'guest' 
-                ? 'bg-navy-deep text-on-secondary' 
-                : 'bg-surface-container-lowest text-navy-deep hover:bg-surface-container-high'
-            }`}
-          >
-            Avulsos
-          </button>
+          {isCurrentUserAdmin && (
+            <>
+              <button 
+                onClick={() => setSelectedFilter('monthly')}
+                className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
+                  selectedFilter === 'monthly' 
+                    ? 'bg-navy-deep text-on-secondary shadow-xs' 
+                    : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
+                }`}
+              >
+                Mensalistas
+              </button>
+              <button 
+                onClick={() => setSelectedFilter('guest')}
+                className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
+                  selectedFilter === 'guest' 
+                    ? 'bg-navy-deep text-on-secondary shadow-xs' 
+                    : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
+                }`}
+              >
+                Avulsos
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* ROSTER SECTION */}
-      <div className="flex flex-col gap-space-sm" id="player-roster-list">
+      {/* LISTA DE ATLETAS (SEM DUPLICIDADE DE TAGS OU DE FILA) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5" id="player-roster-list">
         {filteredPlayers.length > 0 ? (
           filteredPlayers.map((player, idx) => {
             const isGK = player.position === 'Goleiro';
             const isPresent = player.status === 'presente';
             const isAbsent = player.status === 'ausente';
-            const isPaid = player.playerType === 'mensalista' ? player.monthlyPaid : player.paymentStatus === 'pago';
+            const waitingIdx = waitingList.findIndex(w => w.id === player.id);
 
             const jerseyNum = player.number || (idx + 1);
             const jerseyFormatted = String(jerseyNum).padStart(2, '0');
@@ -440,18 +416,19 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
             return (
               <div 
                 key={player.id}
-                className={`player-card relative w-full rounded-2xl p-space-md shadow-[0_4px_20px_rgba(0,58,117,0.05)] transition-all duration-300 hover:shadow-md flex flex-col gap-2.5 animate-slide-up border border-surface-container-high/40 ${
+                className={`player-card relative w-full rounded-2xl p-3.5 shadow-xs transition-all flex flex-col justify-between gap-2.5 border ${
                   isAbsent 
-                    ? 'bg-surface-container-low/70 opacity-80' 
-                    : 'bg-surface-container-lowest/95 backdrop-blur-md'
+                    ? 'bg-surface-container-low/70 border-surface-container-high/30 opacity-75' 
+                    : waitingIdx >= 0
+                      ? 'bg-amber-50/40 border-amber-300/60'
+                      : 'bg-surface-container-lowest border-surface-container-high/40'
                 }`}
-                style={{ animationDelay: `${idx * 30}ms` }}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {/* Jersey Number */}
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    {/* Número */}
                     <span 
-                      className={`font-scoreboard-num text-[36px] leading-none tracking-tighter w-7 text-center shrink-0 ${
+                      className={`font-scoreboard-num text-2xl leading-none tracking-tight w-6 text-center shrink-0 tabular-nums ${
                         isPresent 
                           ? (isGK ? 'text-secondary' : 'text-primary-container') 
                           : 'text-outline'
@@ -461,7 +438,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                     </span>
 
                     {/* Avatar */}
-                    <div className={`relative w-12 h-12 rounded-full overflow-hidden shrink-0 shadow-sm ${isAbsent ? 'grayscale' : ''}`}>
+                    <div className={`relative w-10 h-10 rounded-full overflow-hidden shrink-0 bg-surface-container ${isAbsent ? 'grayscale' : ''}`}>
                       <img 
                         src={player.photoUrl} 
                         alt={player.name}
@@ -470,25 +447,19 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                       />
                     </div>
 
-                    {/* Name & Category */}
+                    {/* Nome, Posição e Categoria (Categoria visível apenas para Diretoria) */}
                     <div className="flex flex-col min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`font-headline-sm text-headline-sm text-navy-deep break-words ${isAbsent ? 'line-through text-on-surface-variant' : ''}`}>
-                          {player.name}
-                        </span>
-                        {isGK && (
-                          <span className="font-label-caps text-label-caps text-primary-container px-1.5 py-0.5 rounded bg-primary-fixed/30 text-[11px] leading-none font-bold shrink-0">
-                            GK
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`font-headline-sm text-sm text-navy-deep font-bold truncate ${isAbsent ? 'line-through text-on-surface-variant' : ''}`}>
+                        {player.name}
+                      </span>
+
+                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
                         {isCurrentUserAdmin ? (
                           <select
                             value={player.position}
                             onChange={(e) => handleQuickChangePosition(player.id, e.target.value)}
-                            className="text-[12px] font-bold text-navy-deep bg-surface-container-high/60 rounded-md px-1.5 py-0.5 border border-surface-container-high outline-none cursor-pointer hover:bg-surface-container active:scale-95 transition-all"
-                            title="Alterar posição cadastrada do atleta"
+                            className="text-[11px] font-bold text-navy-deep bg-surface-container-high/60 rounded px-1.5 py-0.5 border border-surface-container-high outline-none cursor-pointer hover:bg-surface-container"
+                            title="Alterar posição do atleta"
                           >
                             <option value="Goleiro">🧤 Goleiro</option>
                             <option value="Zagueiro">🛡️ Zagueiro</option>
@@ -499,83 +470,110 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                             <option value="Atacante">⚽ Atacante</option>
                           </select>
                         ) : (
-                          <span className="font-semibold text-navy-deep text-body-sm">{player.position}</span>
+                          <span className="text-xs font-semibold text-navy-deep">{player.position}</span>
                         )}
-                        <span className="text-outline text-xs">•</span>
-                        <span className="font-body-sm text-body-sm text-outline break-words">
-                          {player.playerType === 'mensalista' ? 'Mensalista VIP' : 'Avulso'}
-                        </span>
+                        {isCurrentUserAdmin && (
+                          <>
+                            <span className="text-outline text-xs">·</span>
+                            <span className="text-xs text-outline font-medium">
+                              {player.playerType === 'mensalista' ? 'Mensalista' : 'Avulso'}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Status Badges */}
+                  {/* Status Único + Alertas de Exceção (Multas e Pendentes visíveis apenas para Diretoria) */}
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span 
-                      onClick={() => handleToggleStatus(player)}
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-label-md text-[11px] font-semibold select-none ${
-                        isCurrentUserAdmin ? 'cursor-pointer hover:opacity-80 active:scale-95' : ''
-                      } ${
-                        isPresent
-                          ? 'bg-tertiary-fixed text-on-tertiary-fixed'
-                          : isAbsent
-                            ? 'bg-error-container text-on-error-container'
-                            : 'bg-surface-container-highest text-on-surface-variant'
-                      }`}
-                      title={isCurrentUserAdmin ? "Clique para alternar status" : undefined}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        isPresent ? 'bg-tertiary animate-pulse' : isAbsent ? 'bg-error' : 'bg-outline'
-                      }`}></span>
-                      {isPresent ? 'PRESENTE' : isAbsent ? 'AUSENTE' : 'PENDENTE'}
-                    </span>
-
-                    {player.playerType === 'mensalista' ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded font-label-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300/50">
-                        MENSALISTA
+                    {isCurrentUserAdmin ? (
+                      <span 
+                        onClick={() => handleToggleStatus(player)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-label-md text-[11px] font-bold select-none cursor-pointer hover:opacity-85 active:scale-95 ${
+                          isPresent
+                            ? 'bg-tertiary-fixed text-on-tertiary-fixed'
+                            : isAbsent
+                              ? 'bg-error-container text-on-error-container'
+                              : 'bg-surface-container-highest text-on-surface-variant'
+                        }`}
+                        title="Clique para alternar status"
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${
+                          isPresent ? 'bg-tertiary' : isAbsent ? 'bg-error' : 'bg-outline'
+                        }`}></span>
+                        {isPresent ? 'PRESENTE' : isAbsent ? 'AUSENTE' : 'PENDENTE'}
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded font-label-md text-[10px] font-semibold bg-surface-container text-outline">
-                        AVULSO
+                    ) : waitingIdx < 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-label-md text-[11px] font-bold bg-tertiary-fixed text-on-tertiary-fixed">
+                        <span className="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
+                        TITULAR
+                      </span>
+                    ) : null}
+
+                    {waitingIdx >= 0 && (
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
+                        ⏳ #{waitingIdx + 1} Suplente
                       </span>
                     )}
 
-                    {player.suplenteNextMatch && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded font-label-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 animate-pulse">
-                        ⚠️ Suplente (Faltoso)
+                    {isCurrentUserAdmin && (player.hasNoShowFine || player.hasLateRemovalFine) && (
+                      <span className="text-[10px] font-bold text-red-800 bg-red-100 px-2 py-0.5 rounded">
+                        🚨 Multado {player.fineAmount ? `(R$ ${player.fineAmount})` : ''}
                       </span>
                     )}
                   </div>
                 </div>
 
-                {/* Ações de Administração */}
+                {/* Ações do Administrador */}
                 {isCurrentUserAdmin && (
-                  <div className="flex items-center justify-end gap-3 pt-2 border-t border-surface-container-high/40 mt-0.5 flex-wrap">
+                  <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-surface-container-high/40 flex-wrap">
+                    {waitingIdx >= 0 && (
+                      <button
+                        onClick={() => handlePullToMatch(player.id)}
+                        className="text-[11px] font-bold text-primary-container hover:underline flex items-center gap-0.5 active:scale-95"
+                        title="Promover da fila de espera para titular"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
+                        <span>Titular</span>
+                      </button>
+                    )}
+
+                    {(player.hasNoShowFine || player.hasLateRemovalFine) && (
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Confirmar quitação/remoção da multa de ${player.name}?`)) return;
+                          await updateDoc(doc(db, "players", player.id), {
+                            hasNoShowFine: false,
+                            hasLateRemovalFine: false,
+                            fineAmount: 0,
+                            fineReason: null
+                          }).catch(() => {});
+                        }}
+                        className="text-[11px] font-bold text-red-700 hover:underline flex items-center gap-0.5 active:scale-95"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">paid</span>
+                        <span>Quitar Multa</span>
+                      </button>
+                    )}
+
                     <button 
                       onClick={() => handleToggleSuplentePenalty(player)}
-                      className={`text-[11px] font-bold flex items-center gap-1 active:scale-95 transition-transform ${
+                      className={`text-[11px] font-bold flex items-center gap-0.5 active:scale-95 ${
                         player.suplenteNextMatch ? 'text-amber-700 hover:underline' : 'text-outline hover:text-amber-700'
                       }`}
-                      title="Atletas que colocam o nome na lista e não comparecem ficam como suplentes automaticamente na próxima pelada"
                     >
-                      <span className="material-symbols-outlined text-[15px]">
+                      <span className="material-symbols-outlined text-[14px]">
                         {player.suplenteNextMatch ? 'event_available' : 'person_cancel'}
                       </span>
-                      <span>{player.suplenteNextMatch ? 'Remover Suplência' : 'Marcar Falta (Suplente)'}</span>
+                      <span>{player.suplenteNextMatch ? 'Liberar da Suplência' : 'Suplente'}</span>
                     </button>
+
                     <button 
                       onClick={() => openEditModal(player)}
-                      className="text-[11px] font-bold text-secondary flex items-center gap-1 hover:underline active:scale-95 transition-transform"
+                      className="text-[11px] font-bold text-secondary flex items-center gap-0.5 hover:underline active:scale-95"
                     >
-                      <span className="material-symbols-outlined text-[15px]">tune</span>
-                      Editar
-                    </button>
-                    <button 
-                      onClick={() => handleDeletePlayer(player)}
-                      className="text-[11px] font-bold text-error flex items-center gap-1 hover:underline active:scale-95 transition-transform"
-                    >
-                      <span className="material-symbols-outlined text-[15px]">delete</span>
-                      Excluir
+                      <span className="material-symbols-outlined text-[14px]">tune</span>
+                      <span>Editar</span>
                     </button>
                   </div>
                 )}
@@ -583,110 +581,10 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
             );
           })
         ) : (
-          <div className="p-space-lg rounded-2xl bg-canvas-white text-center text-outline font-body-sm shadow-sm">
+          <div className="md:col-span-2 p-6 rounded-2xl bg-surface-container-lowest text-center text-outline text-xs border border-surface-container-high/40">
             Nenhum atleta encontrado para o filtro selecionado.
           </div>
         )}
-      </div>
-
-      {/* WAITING LIST SECTION (ADMIN ACTION) */}
-      {waitingList.length > 0 && (
-        <div className="flex flex-col gap-space-sm mt-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-secondary text-[20px]">hourglass_top</span>
-              <span className="font-headline-sm text-headline-sm text-navy-deep">
-                Fila de Espera ({waitingList.length})
-              </span>
-            </div>
-            <span className="font-label-md text-label-md text-outline">
-              Próximo da fila assume
-            </span>
-          </div>
-
-          {waitingList.map((player, idx) => (
-            <div 
-              key={player.id}
-              className="relative w-full rounded-2xl bg-surface-container-lowest p-space-md shadow-[0_4px_20px_rgba(0,58,117,0.04)] flex items-center justify-between gap-3 border border-surface-container-high/40 animate-fade-in"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-7 h-7 rounded-full bg-secondary-fixed flex items-center justify-center font-label-caps text-label-caps text-on-secondary-fixed shrink-0 font-bold">
-                  #{idx + 1}
-                </div>
-                <div className="relative w-10 h-10 rounded-full overflow-hidden shrink-0">
-                  <img 
-                    src={player.photoUrl} 
-                    alt={player.name}
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-                <div className="flex flex-col min-w-0 flex-1">
-                  <span className="font-headline-sm text-headline-sm text-navy-deep break-words">
-                    {player.name}
-                  </span>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {isCurrentUserAdmin ? (
-                      <select
-                        value={player.position}
-                        onChange={(e) => handleQuickChangePosition(player.id, e.target.value)}
-                        className="text-[11px] font-bold text-secondary bg-surface-container-high/60 rounded px-1.5 py-0.5 border border-surface-container-high outline-none cursor-pointer hover:bg-surface-container"
-                        title="Alterar posição cadastrada do atleta na fila"
-                      >
-                        <option value="Goleiro">🧤 Goleiro</option>
-                        <option value="Zagueiro">🛡️ Zagueiro</option>
-                        <option value="Lateral">⚡ Lateral</option>
-                        <option value="Volante">⚓ Volante</option>
-                        <option value="Meia">🎯 Meia</option>
-                        <option value="Meia-atacante">🪄 Meia-atacante</option>
-                        <option value="Atacante">⚽ Atacante</option>
-                      </select>
-                    ) : (
-                      <span className="font-body-sm text-body-sm text-tertiary font-semibold">
-                        {player.position}
-                      </span>
-                    )}
-                    <span className="text-outline text-xs">• {player.playerType === 'mensalista' ? 'Mensalista VIP' : 'Avulso'}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                {isCurrentUserAdmin && (
-                  <button 
-                    onClick={() => openEditModal(player)}
-                    className="p-2 rounded-xl bg-surface-container text-navy-deep hover:bg-surface-container-high active:scale-95 transition-all"
-                    title="Editar Atleta da Fila"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">tune</span>
-                  </button>
-                )}
-                {isCurrentUserAdmin && (
-                  <button 
-                    onClick={() => handlePullToMatch(player.id)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-primary-container to-primary-bright text-on-primary font-label-lg text-label-lg shadow-md shadow-primary/20 active:scale-95 transition-transform"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">add_circle</span>
-                    <span>PUXAR</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* FLOATING STICKY SHARE ACTION (ZAP DA LISTA) */}
-      <div className="sticky bottom-2 w-full pt-2 z-40">
-        <button 
-          onClick={handleShareRoster}
-          className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-tertiary-container via-tertiary to-navy-deep text-on-tertiary font-headline-sm text-headline-sm flex items-center justify-center gap-2.5 shadow-[0_10px_25px_-5px_rgba(0,129,88,0.4)] active:scale-[0.98] transition-all duration-200"
-        >
-          <span className="material-symbols-outlined text-[22px]">send_to_mobile</span>
-          <span className="tracking-wide">
-            {copiedFeedback ? 'COPIADO COM SUCESSO! ABRINDO WHATSAPP...' : 'ZAP DA LISTA • COPIAR ESCALAÇÃO'}
-          </span>
-        </button>
       </div>
 
       {/* MODAL: EDITAR ATLETA & GOLS MARCADOS (PORTALIZADO PARA EVITAR TELA AZUL E COM TOTAL RESPONSIVIDADE) */}

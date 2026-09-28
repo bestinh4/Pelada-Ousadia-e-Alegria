@@ -419,9 +419,13 @@ const App: React.FC = () => {
     );
   }
 
-  const activePage: Page = !user 
+  const rawActivePage: Page = !user 
     ? Page.Login 
     : (currentPage === Page.Login || !VALID_PAGES.has(currentPage) ? Page.Dashboard : currentPage);
+
+  const activePage: Page = (!isAdmin && (rawActivePage === Page.Finance || rawActivePage === Page.CreateMatch))
+    ? Page.Dashboard
+    : rawActivePage;
 
   return (
     <Layout currentPage={activePage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={enrichedUser}>
