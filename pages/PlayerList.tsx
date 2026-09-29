@@ -267,13 +267,27 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
             </div>
           </div>
 
-          <button 
-            onClick={handleShareRoster}
-            className="min-h-[40px] py-2 px-3.5 rounded-xl bg-tertiary hover:opacity-95 text-on-tertiary font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0"
-          >
-            <span className="material-symbols-outlined text-[18px]">share</span>
-            <span>{copiedFeedback ? 'COPIADO!' : 'ZAP DA LISTA'}</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => {
+                localStorage.setItem('oa_open_history_tab', 'true');
+                onPageChange(Page.TeamBalancing);
+              }}
+              className="min-h-[40px] py-2 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep font-headline-sm text-xs font-bold flex items-center gap-1.5 border border-surface-container-high/60 active:scale-95 transition-all"
+              title="Consultar ou editar peladas encerradas no histórico"
+            >
+              <span className="material-symbols-outlined text-[18px]">history</span>
+              <span>HISTÓRICO</span>
+            </button>
+
+            <button 
+              onClick={handleShareRoster}
+              className="min-h-[40px] py-2 px-3.5 rounded-xl bg-tertiary hover:opacity-95 text-on-tertiary font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0"
+            >
+              <span className="material-symbols-outlined text-[18px]">share</span>
+              <span>{copiedFeedback ? 'COPIADO!' : 'ZAP DA LISTA'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Barra de Progresso */}

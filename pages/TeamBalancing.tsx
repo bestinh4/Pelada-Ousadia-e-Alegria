@@ -64,6 +64,21 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   const [isFinishingPelada, setIsFinishingPelada] = useState(false);
   const [showParticipantsInSummary, setShowParticipantsInSummary] = useState(false);
 
+  // Estados do Histórico de Peladas Encerradas
+  const [activeViewTab, setActiveViewTab] = useState<'current' | 'history'>(() => {
+    const openHist = localStorage.getItem('oa_open_history_tab');
+    if (openHist === 'true') {
+      localStorage.removeItem('oa_open_history_tab');
+      return 'history';
+    }
+    return 'current';
+  });
+  const [historySessions, setHistorySessions] = useState<MatchSession[]>([]);
+  const [historySearch, setHistorySearch] = useState<string>('');
+  const [historyDateFilter, setHistoryDateFilter] = useState<string>('');
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+  const [editingHistorySession, setEditingHistorySession] = useState<MatchSession | null>(null);
+
   // Estados de troca / remanejamento
   const [selectedPlayerToMove, setSelectedPlayerToMove] = useState<{ teamId: string; playerId: string } | null>(null);
   const [targetTeamId, setTargetTeamId] = useState<string>('');
@@ -182,9 +197,34 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         localStorage.removeItem('oa_real_session_cache');
       }
     });
+
+    // Listener em tempo real do Histórico de Peladas Encerradas (coleção sessions, exceto 'current')
+    const unsubHistory = onSnapshot(collection(db, "sessions"), (snap) => {
+      const archived: MatchSession[] = [];
+      snap.forEach((docSnap) => {
+        if (docSnap.id === 'current') return;
+        const raw = docSnap.data() as any;
+        if (raw && Array.isArray(raw.teams)) {
+          archived.push({
+            ...raw,
+            id: docSnap.id,
+            teams: raw.teams.map((t: any, idx: number) => ({
+              ...t,
+              id: t?.id || `team_${idx + 1}`,
+              name: t?.name || `TIME ${idx + 1}`,
+              playerIds: Array.isArray(t?.playerIds) ? t.playerIds : []
+            }))
+          } as MatchSession);
+        }
+      });
+      archived.sort((a, b) => (b.finishedAt || b.createdAt || 0) - (a.finishedAt || a.createdAt || 0));
+      setHistorySessions(archived);
+    });
+
     return () => {
       unsubFinance();
       unsub();
+      unsubHistory();
     };
   }, []);
 
@@ -636,12 +676,37 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   };
 
   // Obter lista consolidada de todos os atletas que colocaram o nome na lista ou foram escalados
-  const getConvokedAthletesList = (): { player: Player; teamName: string }[] => {
+  const getConvokedAthletesList = (targetSession: MatchSession | null = session): { player: Player; teamName: string }[] => {
     const seen = new Set<string>();
     const result: { player: Player; teamName: string }[] = [];
 
-    if (session?.teams) {
-      session.teams.forEach(team => {
+    // Se for uma pelada do histórico que já possui snapshot dos atletas da época
+    if (targetSession?.isHistory && Array.isArray(targetSession.playerSnapshots) && targetSession.playerSnapshots.length > 0) {
+      targetSession.playerSnapshots.forEach(snap => {
+        if (!seen.has(snap.id)) {
+          seen.add(snap.id);
+          const livePlayer = players.find(x => x.id === snap.id);
+          const mergedPlayer: Player = livePlayer || {
+            id: snap.id,
+            name: snap.name,
+            position: snap.position,
+            photoUrl: snap.photoUrl,
+            playerType: snap.playerType || 'avulso',
+            goals: 0,
+            assists: 0,
+            concededGoals: 0,
+            totalGames: 0,
+            totalWins: 0,
+            status: 'pendente'
+          };
+          result.push({ player: mergedPlayer, teamName: snap.teamName || 'Escalado' });
+        }
+      });
+      return result;
+    }
+
+    if (targetSession?.teams) {
+      targetSession.teams.forEach(team => {
         const sortedIds = sortTeamPlayerIds(team.playerIds);
         sortedIds.forEach(pid => {
           const p = players.find(x => x.id === pid);
@@ -653,8 +718,8 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       });
     }
 
-    if (session?.reserves) {
-      session.reserves.forEach(pid => {
+    if (targetSession?.reserves) {
+      targetSession.reserves.forEach(pid => {
         const p = players.find(x => x.id === pid);
         if (p && !seen.has(p.id)) {
           seen.add(p.id);
@@ -663,21 +728,79 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       });
     }
 
-    confirmedPlayers.forEach(p => {
-      if (!seen.has(p.id)) {
-        seen.add(p.id);
-        result.push({ player: p, teamName: 'Confirmado na Lista' });
-      }
-    });
+    if (!targetSession?.isHistory) {
+      confirmedPlayers.forEach(p => {
+        if (!seen.has(p.id)) {
+          seen.add(p.id);
+          result.push({ player: p, teamName: 'Confirmado na Lista' });
+        }
+      });
+    }
 
     return result;
   };
 
-  // Encerrar a Pelada AUTOMATICAMENTE com base no Check-in feito em campo (courtPresence)
+  // Migrar automaticamente qualquer pelada antiga que tenha ficado travada em 'sessions/current' com status 'finished'
+  useEffect(() => {
+    if (!isAdm || !session || session.status !== 'finished' || isFinishingPelada) return;
+    let isCancelled = false;
+    const migrateFinishedCurrentToHistory = async () => {
+      try {
+        const historyId = `history_${session.finishedAt || Date.now()}`;
+        const convoked = getConvokedAthletesList(session);
+        const playerSnapshots = convoked.map(({ player, teamName }) => ({
+          id: player.id,
+          name: player.name,
+          position: player.position,
+          photoUrl: player.photoUrl,
+          playerType: player.playerType || 'avulso',
+          teamName
+        }));
+        const finishedIso = session.summary?.finishedAt || new Date(session.finishedAt || Date.now()).toISOString();
+        await setDoc(doc(db, "sessions", historyId), {
+          ...session,
+          id: historyId,
+          isHistory: true,
+          status: "finished",
+          matchDate: finishedIso.split('T')[0],
+          location: "Granja Cantinho do Céu",
+          playerSnapshots
+        });
+        // Limpar a lista de presença de todos os atletas para a próxima pelada
+        await Promise.all(
+          players
+            .filter(p => p.status !== 'pendente' || p.confirmedAt || p.courtCheckIn)
+            .map(p =>
+              updateDoc(doc(db, "players", p.id), {
+                status: 'pendente',
+                confirmedAt: null,
+                courtCheckIn: false
+              }).catch(() => {})
+            )
+        );
+        if (!isCancelled) {
+          await deleteDoc(doc(db, "sessions", "current"));
+          localStorage.removeItem('oa_real_session_cache');
+          setSelectedIds(new Set());
+          setActiveViewTab('history');
+          setExpandedHistoryId(historyId);
+        }
+      } catch (err) {
+        console.warn("Erro ao migrar sessão encerrada para o histórico:", err);
+      }
+    };
+    migrateFinishedCurrentToHistory();
+    return () => {
+      isCancelled = true;
+    };
+  }, [session?.status, isAdm]);
+
+  // Encerrar a Pelada AUTOMATICAMENTE com base no Check-in feito em campo (courtPresence),
+  // arquivar no Histórico e LIMPAR A LISTA de atletas para a próxima pelada
   const handleAutoFinishPeladaFromCheckIn = async () => {
     if (!session || !isAdm || isFinishingPelada) return;
 
-    const convoked = getConvokedAthletesList();
+    const convoked = getConvokedAthletesList(session);
     const presence = session.courtPresence || {};
 
     const participatedIds: string[] = [];
@@ -695,13 +818,13 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     });
 
     const confirmMsg =
-      `🏁 ENCERRAR PELADA (CONFERÊNCIA AUTOMÁTICA PELO CHECK-IN EM CAMPO)\n\n` +
+      `🏁 ENCERRAR PELADA E LIMPAR LISTA\n\n` +
       `✅ Participaram (Com Check-in em Campo): ${participatedIds.length} atleta(s)\n` +
       `❌ Não Compareceram (Sem Check-in em Campo): ${noShowIds.length} atleta(s)\n` +
       (noShowNames.length > 0
         ? `\n🚨 Faltosos que serão multados (R$ ${fineAmountValue},00) e entrarão na suplência:\n• ${noShowNames.join('\n• ')}\n`
         : `\n👏 Todos os convocados fizeram check-in em campo (0 faltas)!\n`) +
-      `\nConfirma o encerramento oficial da pelada?`;
+      `\n📋 A lista de presença atual será limpa e esta pelada irá para o Histórico (onde a Diretoria poderá consultá-la ou fazer alterações).\n\nConfirma o encerramento oficial?`;
 
     if (!confirm(confirmMsg)) return;
 
@@ -709,38 +832,44 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     try {
       const finedIds = [...noShowIds];
       const exemptNoShowIds: string[] = [];
-      const isFirstFinish = session.status !== 'finished';
-      const nowIso = new Date().toISOString();
+      const nowTs = Date.now();
+      const nowIso = new Date(nowTs).toISOString();
       const matchDateStr = nowIso.split('T')[0];
+      const historyId = `history_${nowTs}`;
 
-      // 1. Atualizar automaticamente os atletas que PARTICIPARAM (fizeram check-in em campo)
+      const convokedIdSet = new Set<string>();
+
+      // 1. Atualizar os atletas que PARTICIPARAM (fizeram check-in em campo) + limpar status para 'pendente'
       const partPromises = participatedIds.map(async (pid) => {
+        convokedIdSet.add(pid);
         const p = players.find(x => x.id === pid);
         if (!p) return;
         const playerTeam = session.teams.find(t => t.playerIds.includes(pid));
         const teamWins = playerTeam?.totalWins || 0;
 
         const updates: Record<string, any> = {
-          courtCheckIn: true,
+          status: 'pendente',
+          confirmedAt: null,
+          courtCheckIn: false,
           hasNoShowFine: false,
           suplenteNextMatch: false,
-          lastParticipatedAt: nowIso
+          lastParticipatedAt: nowIso,
+          totalGames: (p.totalGames || 0) + 1,
+          totalWins: (p.totalWins || 0) + teamWins
         };
-
-        if (isFirstFinish) {
-          updates.totalGames = (p.totalGames || 0) + 1;
-          updates.totalWins = (p.totalWins || 0) + teamWins;
-        }
 
         await updateDoc(doc(db, "players", pid), updates).catch(() => {});
       });
 
-      // 2. Atualizar automaticamente os atletas que NÃO FIZERAM CHECK-IN EM CAMPO (Faltosos -> Multa + Suplente)
+      // 2. Atualizar os atletas que NÃO FIZERAM CHECK-IN EM CAMPO (Faltosos -> Multa + Suplente) + limpar status para 'pendente'
       const noShowPromises = noShowIds.map(async (pid) => {
+        convokedIdSet.add(pid);
         const p = players.find(x => x.id === pid);
         if (!p) return;
 
         const updates: Record<string, any> = {
+          status: 'pendente',
+          confirmedAt: null,
           courtCheckIn: false,
           suplenteNextMatch: true,
           hasNoShowFine: true,
@@ -751,34 +880,58 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
         await updateDoc(doc(db, "players", pid), updates).catch(() => {});
 
-        if (isFirstFinish) {
-          await addDoc(collection(db, "lateRemovals"), {
-            playerId: pid,
-            playerName: p.name || "Atleta",
-            timestamp: nowIso,
-            matchId: "session_current",
-            matchLocation: "Granja Cantinho do Céu",
-            matchDate: matchDateStr,
-            status: 'pendente',
-            fineAmount: fineAmountValue,
-            reason: 'Colocou o nome na lista e não fez check-in em campo (Falta / W.O.)'
-          }).catch(() => {});
-        }
+        await addDoc(collection(db, "lateRemovals"), {
+          playerId: pid,
+          playerName: p.name || "Atleta",
+          timestamp: nowIso,
+          matchId: historyId,
+          matchLocation: "Granja Cantinho do Céu",
+          matchDate: matchDateStr,
+          status: 'pendente',
+          fineAmount: fineAmountValue,
+          reason: 'Colocou o nome na lista e não fez check-in em campo (Falta / W.O.)'
+        }).catch(() => {});
       });
 
-      await Promise.all([...partPromises, ...noShowPromises]);
+      // 3. Limpar o status de qualquer outro atleta na lista que estava como 'presente' ou 'ausente'
+      const cleanOtherPlayersPromises = players
+        .filter(p => !convokedIdSet.has(p.id) && (p.status !== 'pendente' || p.confirmedAt || p.courtCheckIn))
+        .map(p =>
+          updateDoc(doc(db, "players", p.id), {
+            status: 'pendente',
+            confirmedAt: null,
+            courtCheckIn: false
+          }).catch(() => {})
+        );
 
-      // 3. Gravar o encerramento oficial da sessão sincronizado com o check-in de campo
+      await Promise.all([...partPromises, ...noShowPromises, ...cleanOtherPlayersPromises]);
+
+      // 4. Arquivar a pelada encerrada no Histórico ('sessions/history_...')
       const syncedPresence: Record<string, boolean> = {};
       convoked.forEach(({ player }) => {
         syncedPresence[player.id] = !!presence[player.id];
       });
 
-      await updateDoc(doc(db, "sessions", "current"), {
+      const playerSnapshots = convoked.map(({ player, teamName }) => ({
+        id: player.id,
+        name: player.name,
+        position: player.position,
+        photoUrl: player.photoUrl,
+        playerType: player.playerType || 'avulso',
+        teamName
+      }));
+
+      await setDoc(doc(db, "sessions", historyId), {
+        ...session,
+        id: historyId,
+        isHistory: true,
         status: "finished",
-        finishedAt: Date.now(),
-        "activeMatch.startedAt": null,
+        matchDate: matchDateStr,
+        location: "Granja Cantinho do Céu",
+        finishedAt: nowTs,
+        activeMatch: null,
         courtPresence: syncedPresence,
+        playerSnapshots,
         summary: {
           participatedIds,
           noShowIds,
@@ -790,12 +943,19 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         }
       });
 
+      // 5. Remover a sessão ativa atual para deixar o sorteio e a lista 100% limpos
+      await deleteDoc(doc(db, "sessions", "current"));
+      localStorage.removeItem('oa_real_session_cache');
+      setSelectedIds(new Set());
+      setActiveViewTab('history');
+      setExpandedHistoryId(historyId);
+
       playSound('cheer');
 
       try {
         await broadcastNotification(
           "🏁 PELADA ENCERRADA!",
-          `Apuração automática pelo check-in em campo: ${participatedIds.length} participaram e ${finedIds.length} falta(s) com multa.`,
+          `Pelada arquivada no histórico e lista limpa! (${participatedIds.length} participaram · ${finedIds.length} falta(s) com multa).`,
           user?.uid
         );
       } catch {}
@@ -807,27 +967,30 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     }
   };
 
-  // Abrir o Modal Oficial de Revisão/Ajuste (Sempre sincronizado automaticamente com o Check-in de Campo)
-  const handleOpenFinishModal = () => {
-    if (!session || !isAdm) return;
-    const convoked = getConvokedAthletesList();
+  // Abrir o Modal Oficial de Revisão/Ajuste (para a pelada atual OU para uma pelada do histórico)
+  const handleOpenFinishModal = (targetHistorySession?: MatchSession) => {
+    const target = targetHistorySession || session;
+    if (!target || !isAdm) return;
+
+    setEditingHistorySession(targetHistorySession || null);
+
+    const convoked = getConvokedAthletesList(target);
     const initialAtt: Record<string, boolean> = {};
     const initialFined: Record<string, boolean> = {};
 
-    if (session.summary && session.status === 'finished') {
-      const partSet = new Set(session.summary.participatedIds || []);
-      const exemptSet = new Set(session.summary.exemptNoShowIds || []);
+    if (target.summary && target.status === 'finished') {
+      const partSet = new Set(target.summary.participatedIds || []);
+      const exemptSet = new Set(target.summary.exemptNoShowIds || []);
       convoked.forEach(({ player }) => {
         initialAtt[player.id] = partSet.has(player.id);
         initialFined[player.id] = !exemptSet.has(player.id);
       });
-      if (session.summary.fineAmount) {
-        setFineAmountValue(session.summary.fineAmount);
+      if (target.summary.fineAmount !== undefined) {
+        setFineAmountValue(target.summary.fineAmount);
       }
     } else {
-      const presence = session.courtPresence || {};
+      const presence = target.courtPresence || {};
       convoked.forEach(({ player }) => {
-        // Estritamente automático com o check-in feito em campo (Na Quadra)
         initialAtt[player.id] = !!presence[player.id];
         initialFined[player.id] = true;
       });
@@ -838,13 +1001,15 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     setIsFinishModalOpen(true);
   };
 
-  // Confirmar o Encerramento Oficial da Pelada e gravar quem participou, quem faltou e quem será multado
+  // Confirmar o Encerramento Oficial da Pelada (ou salvar alterações em uma Pelada do Histórico)
   const handleConfirmFinishPelada = async () => {
-    if (!session || !isAdm) return;
+    const target = editingHistorySession || session;
+    if (!target || !isAdm) return;
     setIsFinishingPelada(true);
 
     try {
-      const convoked = getConvokedAthletesList();
+      const isEditingHistory = !!editingHistorySession;
+      const convoked = getConvokedAthletesList(target);
       const participatedIds: string[] = [];
       const noShowIds: string[] = [];
       const finedIds: string[] = [];
@@ -863,25 +1028,38 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         }
       });
 
-      const isFirstFinish = session.status !== 'finished';
-      const nowIso = new Date().toISOString();
-      const matchDateStr = nowIso.split('T')[0];
+      const prevPartSet = new Set(target.summary?.participatedIds || []);
+      const nowTs = Date.now();
+      const nowIso = new Date(nowTs).toISOString();
+      const matchDateStr = target.matchDate || nowIso.split('T')[0];
+      const historyId = isEditingHistory ? target.id : `history_${nowTs}`;
+      const convokedIdSet = new Set<string>();
 
       // 1. Atualizar os atletas que PARTICIPARAM (Compareceram na quadra)
       const partPromises = participatedIds.map(async (pid) => {
+        convokedIdSet.add(pid);
         const p = players.find(x => x.id === pid);
         if (!p) return;
-        const playerTeam = session.teams.find(t => t.playerIds.includes(pid));
+        const playerTeam = target.teams.find(t => t.playerIds.includes(pid));
         const teamWins = playerTeam?.totalWins || 0;
 
         const updates: Record<string, any> = {
-          courtCheckIn: true,
           hasNoShowFine: false,
+          hasLateRemovalFine: false,
+          fineAmount: 0,
+          fineReason: null,
           suplenteNextMatch: false,
           lastParticipatedAt: nowIso
         };
 
-        if (isFirstFinish) {
+        if (!isEditingHistory) {
+          updates.status = 'pendente';
+          updates.confirmedAt = null;
+          updates.courtCheckIn = false;
+          updates.totalGames = (p.totalGames || 0) + 1;
+          updates.totalWins = (p.totalWins || 0) + teamWins;
+        } else if (!prevPartSet.has(pid)) {
+          // Era dado como faltoso no histórico e a Diretoria corrigiu para Participou
           updates.totalGames = (p.totalGames || 0) + 1;
           updates.totalWins = (p.totalWins || 0) + teamWins;
         }
@@ -891,27 +1069,39 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
       // 2. Atualizar os atletas que COLOCARAM O NOME E NÃO COMPARECERAM (Faltosos: Multados vs Isentos)
       const noShowPromises = noShowIds.map(async (pid) => {
+        convokedIdSet.add(pid);
         const p = players.find(x => x.id === pid);
         if (!p) return;
         const willBeFined = finedIds.includes(pid);
 
         const updates: Record<string, any> = {
-          courtCheckIn: false,
           suplenteNextMatch: willBeFined,
           hasNoShowFine: willBeFined,
-          hasLateRemovalFine: willBeFined ? true : !!p.hasLateRemovalFine,
+          hasLateRemovalFine: willBeFined,
           fineAmount: willBeFined ? fineAmountValue : 0,
           fineReason: willBeFined ? 'Colocou o nome na lista e não compareceu à pelada (Falta / W.O.)' : null
         };
 
+        if (!isEditingHistory) {
+          updates.status = 'pendente';
+          updates.confirmedAt = null;
+          updates.courtCheckIn = false;
+        } else if (prevPartSet.has(pid)) {
+          // Era dado como presente no histórico e a Diretoria alterou para Faltou
+          const playerTeam = target.teams.find(t => t.playerIds.includes(pid));
+          const teamWins = playerTeam?.totalWins || 0;
+          updates.totalGames = Math.max(0, (p.totalGames || 1) - 1);
+          updates.totalWins = Math.max(0, (p.totalWins || 0) - teamWins);
+        }
+
         await updateDoc(doc(db, "players", pid), updates).catch(() => {});
 
-        if (willBeFined && isFirstFinish) {
+        if (willBeFined && !isEditingHistory) {
           await addDoc(collection(db, "lateRemovals"), {
             playerId: pid,
             playerName: p.name || "Atleta",
             timestamp: nowIso,
-            matchId: "session_current",
+            matchId: historyId,
             matchLocation: "Granja Cantinho do Céu",
             matchDate: matchDateStr,
             status: 'pendente',
@@ -921,63 +1111,107 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         }
       });
 
-      await Promise.all([...partPromises, ...noShowPromises]);
+      // 3. Se estiver encerrando a pelada atual, limpar toda a lista de atletas para a próxima pelada
+      const cleanOtherPlayersPromises = !isEditingHistory
+        ? players
+            .filter(p => !convokedIdSet.has(p.id) && (p.status !== 'pendente' || p.confirmedAt || p.courtCheckIn))
+            .map(p =>
+              updateDoc(doc(db, "players", p.id), {
+                status: 'pendente',
+                confirmedAt: null,
+                courtCheckIn: false
+              }).catch(() => {})
+            )
+        : [];
 
-      // 3. Salvar resumo oficial do encerramento na sessão atual
-      await updateDoc(doc(db, "sessions", "current"), {
+      await Promise.all([...partPromises, ...noShowPromises, ...cleanOtherPlayersPromises]);
+
+      const playerSnapshots = convoked.map(({ player, teamName }) => ({
+        id: player.id,
+        name: player.name,
+        position: player.position,
+        photoUrl: player.photoUrl,
+        playerType: player.playerType || 'avulso',
+        teamName
+      }));
+
+      // 4. Salvar / Atualizar a pelada no Histórico ('sessions/history_...')
+      await setDoc(doc(db, "sessions", historyId), {
+        ...target,
+        id: historyId,
+        isHistory: true,
         status: "finished",
-        finishedAt: Date.now(),
-        "activeMatch.startedAt": null,
+        matchDate: matchDateStr,
+        location: target.location || "Granja Cantinho do Céu",
+        finishedAt: target.finishedAt || nowTs,
+        activeMatch: null,
         courtPresence: attendanceMap,
+        playerSnapshots,
         summary: {
           participatedIds,
           noShowIds,
           finedIds,
           exemptNoShowIds,
           fineAmount: fineAmountValue,
-          totalMatches: session.matchCount || 1,
-          finishedAt: nowIso
+          totalMatches: target.summary?.totalMatches || target.matchCount || 1,
+          finishedAt: target.summary?.finishedAt || nowIso
         }
       });
 
+      // 5. Se estava encerrando a pelada atual, apagar 'sessions/current' e redirecionar para o Histórico
+      if (!isEditingHistory) {
+        await deleteDoc(doc(db, "sessions", "current"));
+        localStorage.removeItem('oa_real_session_cache');
+        setSelectedIds(new Set());
+        setActiveViewTab('history');
+        setExpandedHistoryId(historyId);
+      }
+
       playSound('cheer');
       setIsFinishModalOpen(false);
+      setEditingHistorySession(null);
 
-      try {
-        await broadcastNotification(
-          "🏁 PELADA ENCERRADA!",
-          `Pelada finalizada! ${participatedIds.length} atletas participaram e ${finedIds.length} falta(s) com multa registrada(s).`,
-          user?.uid
-        );
-      } catch {}
+      if (!isEditingHistory) {
+        try {
+          await broadcastNotification(
+            "🏁 PELADA ENCERRADA!",
+            `Pelada arquivada no histórico e lista limpa! ${participatedIds.length} atletas participaram e ${finedIds.length} falta(s) com multa.`,
+            user?.uid
+          );
+        } catch {}
+      }
 
       alert(
-        `🏁 PELADA ENCERRADA COM SUCESSO!\n\n` +
-        `✅ Participaram: ${participatedIds.length} atleta(s)\n` +
-        `❌ Não compareceram: ${noShowIds.length} atleta(s)\n` +
-        `🚨 Multados + Suplência na próxima: ${finedIds.length} atleta(s)\n` +
-        (exemptNoShowIds.length > 0 ? `⚖️ Isentos de multa: ${exemptNoShowIds.length} atleta(s)` : '')
+        isEditingHistory
+          ? `✅ HISTÓRICO DA PELADA ATUALIZADO!\n\nAs alterações de presença e multas desta pelada foram salvas com sucesso.`
+          : `🏁 PELADA ENCERRADA E LISTA LIMPA!\n\n` +
+            `✅ Participaram: ${participatedIds.length} atleta(s)\n` +
+            `❌ Não compareceram: ${noShowIds.length} atleta(s)\n` +
+            `🚨 Multados + Suplência na próxima: ${finedIds.length} atleta(s)\n` +
+            (exemptNoShowIds.length > 0 ? `⚖️ Isentos de multa: ${exemptNoShowIds.length} atleta(s)\n` : '') +
+            `\nA pelada foi movida para o Histórico e a lista está limpa para a próxima convocação.`
       );
     } catch (e) {
       console.error(e);
-      alert("Erro ao encerrar a pelada.");
+      alert("Erro ao salvar dados da pelada.");
     } finally {
       setIsFinishingPelada(false);
     }
   };
 
-  // Alternar rapidamente entre Multado e Isento diretamente no Relatório de Pelada Encerrada
-  const handleTogglePostSummaryFine = async (playerId: string) => {
-    if (!session?.summary || !isAdm) return;
-    const currentFined = session.summary.finedIds || session.summary.noShowIds || [];
+  // Alternar rapidamente entre Multado e Isento diretamente em uma pelada do Histórico
+  const handleTogglePostSummaryFine = async (playerId: string, targetHistory?: MatchSession) => {
+    const target = targetHistory || session;
+    if (!target?.summary || !isAdm) return;
+    const currentFined = target.summary.finedIds || target.summary.noShowIds || [];
     const isCurrentlyFined = currentFined.includes(playerId);
-    const fineVal = session.summary.fineAmount || 20;
+    const fineVal = target.summary.fineAmount || 20;
 
     const newFinedIds = isCurrentlyFined
       ? currentFined.filter(id => id !== playerId)
       : [...currentFined, playerId];
 
-    const newExemptIds = (session.summary.noShowIds || []).filter(id => !newFinedIds.includes(id));
+    const newExemptIds = (target.summary.noShowIds || []).filter(id => !newFinedIds.includes(id));
 
     try {
       await updateDoc(doc(db, "players", playerId), {
@@ -988,7 +1222,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         fineReason: !isCurrentlyFined ? 'Colocou o nome na lista e não compareceu à pelada (Falta / W.O.)' : null
       });
 
-      await updateDoc(doc(db, "sessions", "current"), {
+      await updateDoc(doc(db, "sessions", target.id || "current"), {
         "summary.finedIds": newFinedIds,
         "summary.exemptNoShowIds": newExemptIds
       });
@@ -997,40 +1231,43 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     }
   };
 
-  // Reabrir pelada caso tenha sido encerrada por engano
-  const handleReopenPelada = async () => {
-    if (!session || !isAdm) return;
-    if (!confirm("Deseja reabrir a pelada e voltar para o status 'Em Andamento'?")) return;
+  // Excluir um registro de pelada do histórico (Apenas Diretoria)
+  const handleDeleteHistorySession = async (histSession: MatchSession) => {
+    if (!isAdm || !histSession.id) return;
+    const dateLabel = histSession.matchDate
+      ? new Date(histSession.matchDate + 'T12:00:00').toLocaleDateString('pt-BR')
+      : new Date(histSession.finishedAt || Date.now()).toLocaleDateString('pt-BR');
+    if (!confirm(`Deseja realmente excluir a pelada de ${dateLabel} do histórico permanente?`)) return;
     try {
-      await updateDoc(doc(db, "sessions", "current"), {
-        status: "active",
-        "activeMatch.startedAt": Date.now()
-      });
-      playSound('cheer');
+      await deleteDoc(doc(db, "sessions", histSession.id));
     } catch (e) {
-      alert("Erro ao reabrir a pelada.");
+      alert("Erro ao excluir pelada do histórico.");
     }
   };
 
   // Compartilhar Relatório Oficial de Encerramento (Participantes, Faltosos e Multados) no WhatsApp
-  const handleShareFinishSummaryToWhatsApp = () => {
-    if (!session?.summary) return;
-    const { participatedIds = [], noShowIds = [], finedIds = [], exemptNoShowIds = [], fineAmount = 20, totalMatches = 1 } = session.summary;
+  const handleShareFinishSummaryToWhatsApp = (targetSession?: MatchSession) => {
+    const target = targetSession || session;
+    if (!target?.summary) return;
+    const { participatedIds = [], noShowIds = [], finedIds = [], exemptNoShowIds = [], fineAmount = 20, totalMatches = 1, finishedAt } = target.summary;
 
-    const participatedNames = participatedIds
-      .map(id => players.find(p => p.id === id)?.name)
-      .filter(Boolean);
+    const resolvePlayerName = (id: string) => {
+      const snap = target.playerSnapshots?.find(s => s.id === id);
+      return snap?.name || players.find(p => p.id === id)?.name;
+    };
 
-    const finedNames = finedIds
-      .map(id => players.find(p => p.id === id)?.name)
-      .filter(Boolean);
+    const participatedNames = participatedIds.map(resolvePlayerName).filter(Boolean);
+    const finedNames = finedIds.map(resolvePlayerName).filter(Boolean);
+    const exemptNames = exemptNoShowIds.map(resolvePlayerName).filter(Boolean);
 
-    const exemptNames = exemptNoShowIds
-      .map(id => players.find(p => p.id === id)?.name)
-      .filter(Boolean);
+    const dateFormatted = target.matchDate
+      ? new Date(target.matchDate + 'T12:00:00').toLocaleDateString('pt-BR')
+      : finishedAt
+        ? new Date(finishedAt).toLocaleDateString('pt-BR')
+        : new Date().toLocaleDateString('pt-BR');
 
     let text = `🏁 *RELATÓRIO OFICIAL DE ENCERRAMENTO • O&A* 🇭🇷\n`;
-    text += `📅 Data: ${new Date().toLocaleDateString('pt-BR')}\n`;
+    text += `📅 Data: ${dateFormatted}\n`;
     text += `⚽ Partidas Disputadas: *${totalMatches} jogo(s)*\n\n`;
 
     text += `✅ *PARTICIPARAM DA PELADA (${participatedNames.length}):*\n`;
@@ -1045,7 +1282,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     text += `\n❌ *COLOCARAM O NOME E NÃO COMPARECERAM (${noShowIds.length}):*\n`;
     if (finedNames.length > 0) {
       text += `🚨 *Multados (R$ ${fineAmount},00 + Suplência na próxima):*\n`;
-      finedNames.forEach((name, idx) => {
+      finedNames.forEach((name) => {
         text += `• ${name} (Multa R$ ${fineAmount},00 + Suplente)\n`;
       });
     }
@@ -1342,8 +1579,458 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     .map(id => players.find(p => p.id === id))
     .filter(Boolean) as Player[];
 
+  // Filtragem de peladas do histórico por data ou nome de atleta
+  const filteredHistorySessions = historySessions.filter((hist) => {
+    const dateIso = hist.matchDate || (hist.finishedAt ? new Date(hist.finishedAt).toISOString().split('T')[0] : '');
+    const dateBr = dateIso ? new Date(dateIso + 'T12:00:00').toLocaleDateString('pt-BR') : '';
+
+    if (historyDateFilter && dateIso !== historyDateFilter) {
+      return false;
+    }
+
+    if (!historySearch.trim()) return true;
+    const q = historySearch.trim().toLowerCase();
+
+    if (dateBr.toLowerCase().includes(q) || dateIso.toLowerCase().includes(q)) return true;
+    if ((hist.location || '').toLowerCase().includes(q)) return true;
+
+    const hasAthleteInSnapshots = (hist.playerSnapshots || []).some(
+      s => (s.name || '').toLowerCase().includes(q) || (s.position || '').toLowerCase().includes(q)
+    );
+    if (hasAthleteInSnapshots) return true;
+
+    const allTeamPids = hist.teams.flatMap(t => t.playerIds);
+    return allTeamPids.some(pid => {
+      const p = players.find(x => x.id === pid);
+      return p && (p.name || '').toLowerCase().includes(q);
+    });
+  });
+
   return (
     <div className="flex flex-col w-full max-w-5xl mx-auto pb-6 gap-4 animate-fade-in">
+      {/* BARRA SUPERIOR DE ALTERNÂNCIA: PELADA ATUAL vs HISTÓRICO DE PELADAS */}
+      <div className="bg-surface-container-lowest p-1.5 rounded-2xl border border-surface-container-high/50 shadow-xs flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveViewTab('current')}
+          className={`flex-1 min-h-[42px] py-2 px-3 rounded-xl font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+            activeViewTab === 'current'
+              ? 'bg-navy-deep text-white shadow-sm'
+              : 'text-navy-deep hover:bg-surface-container'
+          }`}
+        >
+          <span className="material-symbols-outlined text-[18px]">sports_soccer</span>
+          <span>Pelada Atual</span>
+          {session && session.teams.length > 0 && (
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+              activeViewTab === 'current' ? 'bg-emerald-400 text-emerald-950' : 'bg-emerald-100 text-emerald-900'
+            }`}>
+              Ativa
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveViewTab('history')}
+          className={`flex-1 min-h-[42px] py-2 px-3 rounded-xl font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+            activeViewTab === 'history'
+              ? 'bg-navy-deep text-white shadow-sm'
+              : 'text-navy-deep hover:bg-surface-container'
+          }`}
+        >
+          <span className="material-symbols-outlined text-[18px]">history</span>
+          <span>Histórico de Peladas</span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold tabular-nums ${
+            activeViewTab === 'history' ? 'bg-white/20 text-white' : 'bg-surface-container-high text-navy-deep'
+          }`}>
+            {historySessions.length}
+          </span>
+        </button>
+      </div>
+
+      {activeViewTab === 'history' ? (
+        /* ABA DE HISTÓRICO DE PELADAS ENCERRADAS (CONSULTA E EDIÇÃO PELA DIRETORIA) */
+        <div className="flex flex-col gap-4 animate-fade-in">
+          {/* Painel de Busca no Histórico */}
+          <div className="bg-surface-container-lowest rounded-2xl p-4 sm:p-5 border border-surface-container-high/40 shadow-xs flex flex-col gap-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-[22px]">manage_search</span>
+                </div>
+                <div>
+                  <h2 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold">
+                    Histórico Oficial de Peladas Encerradas
+                  </h2>
+                  <p className="text-xs text-outline">
+                    {isAdm
+                      ? 'Procure qualquer pelada encerrada por data ou atleta para revisar presenças, faltas ou multas.'
+                      : 'Consulte o registro oficial das peladas encerradas, equipes e presenças.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+              <div className="sm:col-span-8 relative">
+                <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-outline text-[19px]">
+                  search
+                </span>
+                <input
+                  type="text"
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder="Buscar por data (ex: 28/09/2026) ou nome do atleta..."
+                  className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-container-low border border-surface-container-high/60 text-xs sm:text-sm font-medium text-navy-deep outline-none focus:bg-white focus:border-primary-container transition-all"
+                />
+              </div>
+
+              <div className="sm:col-span-4 flex items-center gap-2">
+                <input
+                  type="date"
+                  value={historyDateFilter}
+                  onChange={(e) => setHistoryDateFilter(e.target.value)}
+                  className="flex-1 h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high/60 text-xs sm:text-sm font-semibold text-navy-deep outline-none focus:bg-white focus:border-primary-container cursor-pointer"
+                  title="Filtrar por data exata"
+                />
+                {(historySearch || historyDateFilter) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistorySearch('');
+                      setHistoryDateFilter('');
+                    }}
+                    className="h-11 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep text-xs font-bold shrink-0 active:scale-95"
+                    title="Limpar filtros"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Lista de Peladas do Histórico */}
+          {filteredHistorySessions.length === 0 ? (
+            <div className="bg-surface-container-lowest rounded-2xl p-8 border border-surface-container-high/40 text-center flex flex-col items-center gap-2.5">
+              <div className="w-12 h-12 rounded-2xl bg-surface-container flex items-center justify-center text-outline">
+                <span className="material-symbols-outlined text-[26px]">history_toggle_off</span>
+              </div>
+              <h3 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold">
+                Nenhuma pelada encontrada no histórico
+              </h3>
+              <p className="text-xs text-outline max-w-md">
+                {historySessions.length === 0
+                  ? 'Assim que uma pelada for encerrada, a lista atual será limpa e ela ficará arquivada aqui para consulta e ajustes da Diretoria.'
+                  : 'Nenhuma pelada corresponde ao filtro de data ou nome pesquisado.'}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3.5">
+              {filteredHistorySessions.map((hist) => {
+                const isExpanded = expandedHistoryId === hist.id;
+                const summary = hist.summary || {
+                  participatedIds: [],
+                  noShowIds: [],
+                  finedIds: [],
+                  exemptNoShowIds: [],
+                  fineAmount: 20,
+                  totalMatches: hist.matchCount || 1,
+                  finishedAt: hist.finishedAt ? new Date(hist.finishedAt).toISOString() : ''
+                };
+
+                const dateIso = hist.matchDate || (hist.finishedAt ? new Date(hist.finishedAt).toISOString().split('T')[0] : '');
+                const dateFormatted = dateIso
+                  ? new Date(dateIso + 'T12:00:00').toLocaleDateString('pt-BR', {
+                      weekday: 'short',
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric'
+                    })
+                  : 'Data não informada';
+                const timeFormatted = hist.finishedAt
+                  ? new Date(hist.finishedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                  : '';
+
+                const resolveAthlete = (pid: string): Player => {
+                  const snap = hist.playerSnapshots?.find(s => s.id === pid);
+                  const live = players.find(p => p.id === pid);
+                  if (live) return live;
+                  return {
+                    id: pid,
+                    name: snap?.name || 'Atleta',
+                    position: snap?.position || 'Linha',
+                    photoUrl: snap?.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(snap?.name || 'A')}&background=003a75&color=fff`,
+                    playerType: snap?.playerType || 'avulso',
+                    goals: 0,
+                    assists: 0,
+                    concededGoals: 0,
+                    totalGames: 0,
+                    totalWins: 0,
+                    status: 'pendente'
+                  };
+                };
+
+                const participatedPlayers = (summary.participatedIds || []).map(resolveAthlete);
+                const noShowPlayers = (summary.noShowIds || []).map(resolveAthlete);
+                const finedIds = summary.finedIds || [];
+                const fineAmount = summary.fineAmount ?? 20;
+
+                return (
+                  <div
+                    key={hist.id}
+                    className="bg-surface-container-lowest rounded-2xl border border-surface-container-high/50 shadow-xs overflow-hidden flex flex-col transition-all"
+                  >
+                    {/* Cabeçalho do Card da Pelada Encerrada */}
+                    <div className="p-4 sm:p-5 bg-gradient-to-br from-slate-900 via-navy-deep to-slate-950 text-white flex flex-col gap-3.5">
+                      <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-11 h-11 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 shrink-0">
+                            <span className="material-symbols-outlined text-[24px]">event_available</span>
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-[10px] bg-emerald-400 text-emerald-950 font-bold px-2 py-0.5 rounded uppercase tracking-wider">
+                                PELADA ENCERRADA
+                              </span>
+                              <span className="text-xs text-amber-300 font-bold uppercase">
+                                📅 {dateFormatted} {timeFormatted ? `• ${timeFormatted}` : ''}
+                              </span>
+                            </div>
+                            <h3 className="font-headline-sm text-sm sm:text-base font-bold mt-1 truncate">
+                              {hist.location || 'Granja Cantinho do Céu'} • {summary.totalMatches || hist.matchCount || 1} jogo(s) disputado(s)
+                            </h3>
+                          </div>
+                        </div>
+
+                        {/* Botões de Ação do Histórico */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleShareFinishSummaryToWhatsApp(hist)}
+                            className="min-h-[38px] py-2 px-3 bg-emerald-500 hover:bg-emerald-600 text-emerald-950 rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">share</span>
+                            <span>ZAP RELATÓRIO</span>
+                          </button>
+
+                          {isAdm && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenFinishModal(hist)}
+                              className="min-h-[38px] py-2 px-3 bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                              title="Fazer alterações de presença, faltas ou multas nesta pelada do histórico"
+                            >
+                              <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                              <span> Fazer Alteração</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setExpandedHistoryId(isExpanded ? null : hist.id)}
+                            className="min-h-[38px] py-2 px-3 bg-white/15 hover:bg-white/25 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1 active:scale-95 transition-all"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">
+                              {isExpanded ? 'expand_less' : 'expand_more'}
+                            </span>
+                            <span>{isExpanded ? 'Ocultar' : 'Ver Detalhes'}</span>
+                          </button>
+
+                          {isAdm && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteHistorySession(hist)}
+                              className="w-9 h-9 rounded-xl bg-red-500/20 hover:bg-red-500/35 text-red-300 border border-red-400/30 flex items-center justify-center active:scale-95 transition-all"
+                              title="Excluir esta pelada do histórico"
+                            >
+                              <span className="material-symbols-outlined text-[17px]">delete</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 3 Indicadores Rápidos */}
+                      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                        <div className="bg-emerald-500/15 border border-emerald-400/30 rounded-xl p-2.5 text-center sm:text-left">
+                          <span className="text-[10px] font-bold uppercase text-emerald-300 block">
+                            ✅ Participaram
+                          </span>
+                          <span className="font-scoreboard-num text-xl sm:text-2xl text-white leading-none mt-1 block tabular-nums">
+                            {participatedPlayers.length}
+                          </span>
+                        </div>
+
+                        <div className="bg-amber-500/15 border border-amber-400/30 rounded-xl p-2.5 text-center sm:text-left">
+                          <span className="text-[10px] font-bold uppercase text-amber-300 block">
+                            ❌ Faltaram
+                          </span>
+                          <span className="font-scoreboard-num text-xl sm:text-2xl text-white leading-none mt-1 block tabular-nums">
+                            {noShowPlayers.length}
+                          </span>
+                        </div>
+
+                        <div className="bg-red-500/20 border border-red-400/40 rounded-xl p-2.5 text-center sm:text-left">
+                          <span className="text-[10px] font-bold uppercase text-red-300 block">
+                            🚨 Multados
+                          </span>
+                          <span className="font-scoreboard-num text-xl sm:text-2xl text-white leading-none mt-1 block tabular-nums">
+                            {finedIds.length}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Detalhes Expandidos da Pelada do Histórico */}
+                    {isExpanded && (
+                      <div className="p-4 sm:p-5 flex flex-col gap-4 bg-surface-container-lowest border-t border-surface-container-high/40">
+                        {/* Lista de Faltosos & Multas (com botão rápido de Isentar / Multar para a Diretoria) */}
+                        <div className="rounded-xl p-3.5 bg-surface-container-low border border-surface-container-high/50 flex flex-col gap-2.5">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep flex items-center gap-1.5">
+                              <span className="material-symbols-outlined text-red-600 text-[18px]">person_off</span>
+                              <span>Não Compareceram ({noShowPlayers.length})</span>
+                            </h4>
+                            {isAdm && (
+                              <span className="text-[11px] text-outline font-medium">
+                                Toque em &quot;Isentar&quot; ou &quot;Multar&quot; ou clique em &quot;Fazer Alteração&quot; acima para mudar presenças
+                              </span>
+                            )}
+                          </div>
+
+                          {noShowPlayers.length === 0 ? (
+                            <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
+                              <span className="material-symbols-outlined text-[18px] text-emerald-600">verified</span>
+                              <span>Todos os atletas convocados participaram desta pelada (0 faltas).</span>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {noShowPlayers.map((p) => {
+                                const isFined = finedIds.includes(p.id);
+                                const teamOfPlayer = hist.teams.find(t => t.playerIds.includes(p.id))?.name || 'Lista';
+                                return (
+                                  <div
+                                    key={p.id}
+                                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                                      isFined
+                                        ? 'bg-red-50/70 border-red-300'
+                                        : 'bg-amber-50/60 border-amber-300'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <img
+                                        src={p.photoUrl}
+                                        alt={p.name}
+                                        className="w-8 h-8 rounded-full object-cover shrink-0 border border-surface-container-high"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                      <div className="min-w-0">
+                                        <p className="font-headline-sm text-xs font-bold text-navy-deep truncate">
+                                          {p.name}
+                                        </p>
+                                        <span className="text-[10px] text-outline block truncate">
+                                          {p.position} · {teamOfPlayer} · {isFined ? `Multado R$ ${fineAmount}` : 'Isento de Multa'}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {isAdm && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleTogglePostSummaryFine(p.id, hist)}
+                                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase shrink-0 transition-all active:scale-95 ${
+                                          isFined
+                                            ? 'bg-white text-navy-deep border border-surface-container-high hover:bg-surface-container'
+                                            : 'bg-red-600 hover:bg-red-700 text-white'
+                                        }`}
+                                      >
+                                        {isFined ? 'Isentar' : 'Multar'}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Lista de Atletas que Participaram */}
+                        <div className="rounded-xl p-3.5 bg-surface-container-low border border-surface-container-high/50 flex flex-col gap-2.5">
+                          <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-emerald-600 text-[18px]">check_circle</span>
+                            <span>Participaram da Pelada ({participatedPlayers.length})</span>
+                          </h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                            {participatedPlayers.map((p) => (
+                              <div
+                                key={p.id}
+                                className="flex items-center gap-2 p-2 rounded-xl bg-white border border-emerald-500/25 shadow-2xs"
+                              >
+                                <img
+                                  src={p.photoUrl}
+                                  alt={p.name}
+                                  className="w-6 h-6 rounded-full object-cover shrink-0"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-navy-deep truncate">{p.name}</p>
+                                  <span className="text-[10px] text-outline block truncate">{p.position}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Equipes Escaladas naquela Pelada */}
+                        <div className="flex flex-col gap-2">
+                          <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep px-1">
+                            Equipes Escaladas na Pelada
+                          </h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                            {hist.teams.map((t, tIdx) => {
+                              const theme = TEAM_THEMES[tIdx] || { name: t.name, headerBg: 'bg-navy-deep', dot: '⚽' };
+                              return (
+                                <div
+                                  key={t.id || tIdx}
+                                  className="rounded-xl border border-surface-container-high/50 overflow-hidden bg-white flex flex-col"
+                                >
+                                  <div className={`px-3 py-2 ${theme.headerBg} text-white flex items-center justify-between text-xs font-bold`}>
+                                    <span>{theme.dot} {t.name}</span>
+                                    <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded">
+                                      {t.totalWins || 0} vitória(s)
+                                    </span>
+                                  </div>
+                                  <div className="p-2.5 flex flex-col gap-1">
+                                    {t.playerIds.map((pid) => {
+                                      const p = resolveAthlete(pid);
+                                      const part = (summary.participatedIds || []).includes(pid);
+                                      return (
+                                        <div key={pid} className="flex items-center justify-between text-xs py-0.5">
+                                          <span className="font-semibold text-navy-deep truncate">
+                                            {p.name} <span className="text-[10px] text-outline">({p.position})</span>
+                                          </span>
+                                          <span className={`text-[10px] font-bold ${part ? 'text-emerald-700' : 'text-red-600'}`}>
+                                            {part ? 'Presente' : 'Faltou'}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
       <main className="w-full">
         <AnimatePresence mode="wait">
           {/* ANIMAÇÃO DE EMBARALHAMENTO */}
@@ -1558,7 +2245,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                   {isAdm && (
                     <button
                       type="button"
-                      onClick={handleOpenFinishModal}
+                      onClick={() => handleOpenFinishModal()}
                       className="min-h-[40px] py-2 px-3 bg-surface-container hover:bg-surface-container-high text-navy-deep rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
                       title="Ajuste manual de presença, faltas e multas"
                     >
@@ -1671,7 +2358,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
                         <div className="flex items-center gap-2 flex-wrap">
                           <button
-                            onClick={handleShareFinishSummaryToWhatsApp}
+                            onClick={() => handleShareFinishSummaryToWhatsApp()}
                             className="min-h-[38px] py-2 px-3 bg-emerald-500 hover:bg-emerald-600 text-emerald-950 rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
                           >
                             <span className="material-symbols-outlined text-[16px]">share</span>
@@ -1680,21 +2367,11 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
                           {isAdm && (
                             <button
-                              onClick={handleOpenFinishModal}
+                              onClick={() => handleOpenFinishModal()}
                               className="min-h-[38px] py-2 px-3 bg-white/15 hover:bg-white/25 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
                             >
                               <span className="material-symbols-outlined text-[16px]">edit_note</span>
                               <span>Ajuste Manual</span>
-                            </button>
-                          )}
-
-                          {isAdm && (
-                            <button
-                              onClick={handleReopenPelada}
-                              className="min-h-[38px] py-2 px-3 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/30 rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1 active:scale-95 transition-all"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">replay</span>
-                              <span>Reabrir</span>
                             </button>
                           )}
                         </div>
@@ -2292,6 +2969,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
           )}
         </AnimatePresence>
       </main>
+      )}
 
       {/* MODAL 1: REMANEJAR / TROCAR ATLETAS ENTRE TIMES (PORTALIZADO NO BODY PARA RESPONSIVIDADE TOTAL) */}
       {isRemanageModalOpen && session && typeof document !== 'undefined' && createPortal(
@@ -2563,13 +3241,16 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         document.body
       )}
 
-      {/* MODAL 3: AJUSTE MANUAL / ENCERRAMENTO OFICIAL DA PELADA (PORTALIZADO NO BODY) */}
-      {isFinishModalOpen && session && typeof document !== 'undefined' && createPortal(
+      {/* MODAL 3: AJUSTE MANUAL / ENCERRAMENTO OFICIAL DA PELADA OU EDIÇÃO DO HISTÓRICO (PORTALIZADO NO BODY) */}
+      {isFinishModalOpen && (editingHistorySession || session) && typeof document !== 'undefined' && createPortal(
         <div 
           style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
           className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 overflow-hidden"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setIsFinishModalOpen(false);
+            if (e.target === e.currentTarget) {
+              setIsFinishModalOpen(false);
+              setEditingHistorySession(null);
+            }
           }}
         >
           <div 
@@ -2584,16 +3265,23 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                 </div>
                 <div className="min-w-0">
                   <h3 className="font-headline-sm text-sm sm:text-lg text-navy-deep font-bold leading-tight truncate">
-                    Ajuste Manual • Presença e Multas
+                    {editingHistorySession
+                      ? `Alterar Pelada do Histórico (${editingHistorySession.matchDate ? new Date(editingHistorySession.matchDate + 'T12:00:00').toLocaleDateString('pt-BR') : 'Encerrada'})`
+                      : 'Ajuste Manual • Presença e Multas'}
                   </h3>
                   <p className="font-body-sm text-[11px] sm:text-xs text-outline truncate">
-                    Defina quem participou na quadra e quem receberá multa
+                    {editingHistorySession
+                      ? 'Altere presenças, faltas ou multas desta pelada arquivada no histórico'
+                      : 'Defina quem participou na quadra e quem receberá multa'}
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setIsFinishModalOpen(false)}
+                onClick={() => {
+                  setIsFinishModalOpen(false);
+                  setEditingHistorySession(null);
+                }}
                 className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-outline hover:text-navy-deep shrink-0 active:scale-95"
               >
                 <span className="material-symbols-outlined text-[18px]">close</span>
@@ -2601,7 +3289,8 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
             </div>
 
             {(() => {
-              const convokedList = getConvokedAthletesList();
+              const targetModalSession = editingHistorySession || session;
+              const convokedList = getConvokedAthletesList(targetModalSession);
               const presentCount = convokedList.filter(({ player }) => !!attendanceMap[player.id]).length;
               const absentList = convokedList.filter(({ player }) => !attendanceMap[player.id]);
               const absentCount = absentList.length;
@@ -2676,7 +3365,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                         type="button"
                         onClick={() => {
                           const next: Record<string, boolean> = {};
-                          const presence = session.courtPresence || {};
+                          const presence = targetModalSession?.courtPresence || {};
                           convokedList.forEach(({ player }) => {
                             next[player.id] = !!presence[player.id];
                           });
@@ -2783,7 +3472,10 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                   <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-surface-container-high/50 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setIsFinishModalOpen(false)}
+                      onClick={() => {
+                        setIsFinishModalOpen(false);
+                        setEditingHistorySession(null);
+                      }}
                       className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-surface-container text-navy-deep font-label-md text-xs font-bold active:scale-95"
                     >
                       Cancelar
@@ -2795,7 +3487,13 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                       className="px-4 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-800 text-white font-headline-sm text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-lg shadow-red-900/25 active:scale-95 transition-all disabled:opacity-50"
                     >
                       <span className="material-symbols-outlined text-[18px]">flag</span>
-                      <span>{isFinishingPelada ? 'Salvando...' : 'Salvar Relatório'}</span>
+                      <span>
+                        {isFinishingPelada
+                          ? 'Salvando...'
+                          : editingHistorySession
+                            ? 'Salvar Alterações no Histórico'
+                            : 'Encerrar Pelada e Limpar Lista'}
+                      </span>
                     </button>
                   </div>
                 </>

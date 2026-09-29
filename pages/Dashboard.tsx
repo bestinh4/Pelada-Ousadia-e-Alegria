@@ -376,7 +376,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {/* BOTÃO 1: ABRIR LISTA DA PRÓXIMA PELADA */}
             <button
               onClick={handleReleaseNextPelada}
@@ -388,7 +388,20 @@ const Dashboard: React.FC<DashboardProps> = ({
               <span className="truncate">{isReleasingList ? 'LIBERANDO...' : 'ABRIR PRÓXIMA LISTA'}</span>
             </button>
 
-            {/* BOTÃO 2: CADASTRAR NOVO ATLETA */}
+            {/* BOTÃO 2: HISTÓRICO DE PELADAS ENCERRADAS */}
+            <button
+              onClick={() => {
+                localStorage.setItem('oa_open_history_tab', 'true');
+                onPageChange(Page.TeamBalancing);
+              }}
+              className="min-h-[44px] py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+              title="Procurar peladas encerradas no histórico e fazer alterações de presença ou multas"
+            >
+              <span className="material-symbols-outlined text-[18px] shrink-0">history</span>
+              <span className="truncate">HISTÓRICO DE PELADAS</span>
+            </button>
+
+            {/* BOTÃO 3: CADASTRAR NOVO ATLETA */}
             <button
               onClick={() => setIsAddingManual(true)}
               className="min-h-[44px] py-2.5 px-3 bg-gradient-to-r from-primary-container to-primary-bright hover:opacity-95 text-on-primary rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
@@ -398,7 +411,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               <span className="truncate">CADASTRAR ATLETA</span>
             </button>
 
-            {/* BOTÃO 3: DEFINIR VALORES (AVULSO, MENSALISTA E MULTA) */}
+            {/* BOTÃO 4: DEFINIR VALORES (AVULSO, MENSALISTA E MULTA) */}
             <button
               onClick={() => {
                 setPriceForm(prices);

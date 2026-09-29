@@ -27,8 +27,21 @@ export interface Team {
   isIncomplete: boolean;
 }
 
+export interface ArchivedPlayerSnapshot {
+  id: string;
+  name: string;
+  position: string;
+  photoUrl: string;
+  playerType: 'mensalista' | 'avulso';
+  teamName: string;
+}
+
 export interface MatchSession {
   id: string;
+  isHistory?: boolean;
+  matchDate?: string;
+  location?: string;
+  playerSnapshots?: ArchivedPlayerSnapshot[];
   status: "waiting" | "active" | "finished";
   teams: Team[];
   waitingQueue: string[]; // Array de teamIds
