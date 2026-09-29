@@ -4,7 +4,7 @@ import { Player, Match } from './types.ts';
 
 export const MASTER_ADMIN_EMAIL = 'diiogo49@gmail.com';
 
-export const MAIN_LOGO_URL = "/src/assets/images/ousadia_alegria_crest_1790649661614.jpg";
+export const MAIN_LOGO_URL = "/images/ousadia_alegria_crest.png?v=17";
 
 export const MAINTENANCE_MASCOTS_IMG = "/images/maintenance_mascots.jpg";
 
