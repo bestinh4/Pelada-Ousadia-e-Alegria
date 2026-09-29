@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Match, Player, Page } from '../types.ts';
+import { Match, Player, Page, PixConfig } from '../types.ts';
 import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
+import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
+import { PixPaymentModal } from '../components/PixPaymentModal.tsx';
 import { playSound } from '../utils/sound.ts';
 
 interface DashboardProps {
@@ -53,7 +55,11 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [isCreating, setIsCreating] = useState(false);
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [priceForm, setPriceForm] = useState({ mensalista: 60, avulso: 40, multa: 20 });
+  const [pixConfig, setPixConfig] = useState<PixConfig>(DEFAULT_PIX_CONFIG);
+  const [pixForm, setPixForm] = useState<PixConfig>(DEFAULT_PIX_CONFIG);
   const [isSavingPrices, setIsSavingPrices] = useState(false);
+  const [isPixModalOpen, setIsPixModalOpen] = useState(false);
+  const [sharedReceiptFile, setSharedReceiptFile] = useState<File | null>(null);
   const [newPlayerData, setNewPlayerData] = useState({
     name: '',
     position: 'Atacante',
@@ -71,14 +77,51 @@ const Dashboard: React.FC<DashboardProps> = ({
           avulso: Number(data.avulso) || 40,
           multa: Number(data.multa) || 20
         };
+        const normalizedPix: PixConfig = {
+          pixKey: data.pixKey || DEFAULT_PIX_CONFIG.pixKey,
+          pixKeyType: data.pixKeyType || DEFAULT_PIX_CONFIG.pixKeyType,
+          receiverName: data.receiverName || DEFAULT_PIX_CONFIG.receiverName,
+          receiverCity: data.receiverCity || DEFAULT_PIX_CONFIG.receiverCity,
+          bankLabel: data.bankLabel || DEFAULT_PIX_CONFIG.bankLabel
+        };
         setPrices(normalized);
         setPriceForm(normalized);
+        setPixConfig(normalizedPix);
+        setPixForm(normalizedPix);
         try {
-          localStorage.setItem('oa_real_finance_cache', JSON.stringify(normalized));
+          localStorage.setItem('oa_real_finance_cache', JSON.stringify({ ...normalized, ...normalizedPix }));
         } catch {}
       }
     });
     return () => unsubPrices();
+  }, []);
+
+  // Verifica se o atleta acabou de compartilhar um comprovante direto do app do banco (Web Share Target API)
+  useEffect(() => {
+    const checkSharedReceipt = async () => {
+      try {
+        if (!('caches' in window)) return;
+        const cache = await caches.open('oa-shared-receipt-cache');
+        const response = await cache.match('/__shared-receipt-file');
+        if (response) {
+          const blob = await response.blob();
+          const encodedName = response.headers.get('X-Receipt-Name') || 'comprovante.jpg';
+          const fileName = decodeURIComponent(encodedName);
+          const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' });
+          await cache.delete('/__shared-receipt-file');
+          setSharedReceiptFile(file);
+          setIsPixModalOpen(true);
+
+          if (window.location.search.includes('shared-receipt')) {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
+      } catch (e) {
+        console.warn('Erro ao recuperar comprovante compartilhado:', e);
+      }
+    };
+
+    checkSharedReceipt();
   }, []);
 
   const handleSaveFinancePrices = async () => {
@@ -89,6 +132,10 @@ const Dashboard: React.FC<DashboardProps> = ({
         mensalista: Math.max(0, Number(priceForm.mensalista) || 0),
         avulso: Math.max(0, Number(priceForm.avulso) || 0),
         multa: Math.max(0, Number(priceForm.multa) || 0),
+        pixKey: (pixForm.pixKey || DEFAULT_PIX_CONFIG.pixKey).trim(),
+        pixKeyType: pixForm.pixKeyType || 'email',
+        receiverName: (pixForm.receiverName || DEFAULT_PIX_CONFIG.receiverName).trim(),
+        receiverCity: (pixForm.receiverCity || DEFAULT_PIX_CONFIG.receiverCity).trim(),
         updatedAt: new Date().toISOString()
       };
       await setDoc(doc(db, "settings", "finance"), payload, { merge: true });
@@ -96,7 +143,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         await updateDoc(doc(db, "matches", match.id), { price: payload.avulso }).catch(() => {});
       }
       setIsEditingPrices(false);
-      alert("Valores de Mensalista, Avulso e Multa atualizados com sucesso!");
+      alert("Valores e Chave Pix Oficial atualizados com sucesso!");
     } catch {
       alert("Erro ao salvar valores.");
     } finally {
@@ -309,7 +356,8 @@ const Dashboard: React.FC<DashboardProps> = ({
             return updateDoc(doc(db, "players", p.id), {
               status: 'pendente',
               confirmedAt: null,
-              courtCheckIn: false
+              courtCheckIn: false,
+              paymentStatus: 'pendente'
             });
           }
         });
@@ -517,13 +565,14 @@ const Dashboard: React.FC<DashboardProps> = ({
             <button
               onClick={() => {
                 setPriceForm(prices);
+                setPixForm(pixConfig);
                 setIsEditingPrices(true);
               }}
               className="min-h-[44px] py-2.5 px-3 bg-navy-deep hover:opacity-95 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
-              title="Definir valores de Avulsos, Mensalistas e Multas"
+              title="Definir valores de Avulsos, Mensalistas, Multas e Chave Pix"
             >
               <span className="material-symbols-outlined text-[18px] shrink-0">payments</span>
-              <span className="truncate">DEFINIR VALORES</span>
+              <span className="truncate">VALORES & PIX</span>
             </button>
           </div>
 
@@ -703,8 +752,130 @@ const Dashboard: React.FC<DashboardProps> = ({
               </div>
             )}
           </div>
+
+          {/* COBRANÇA PIX DIRETO NO APP & ENVIO AUTOMÁTICO DE COMPROVANTE */}
+          {currentPlayer && (
+            (() => {
+              const isGoleiroExempt = currentPlayer.position === 'Goleiro';
+              const isMensal = currentPlayer.playerType === 'mensalista';
+              const isPaidNow = isGoleiroExempt || (isMensal ? Boolean(currentPlayer.monthlyPaid) : currentPlayer.paymentStatus === 'pago');
+              const hasFineNow = Boolean(currentPlayer.hasNoShowFine || currentPlayer.hasLateRemovalFine);
+              const fineValNow = hasFineNow ? (currentPlayer.fineAmount || prices.multa || 20) : 0;
+              const baseValNow = isGoleiroExempt ? 0 : (isMensal ? prices.mensalista : prices.avulso);
+              const totalDueNow = (isPaidNow ? 0 : baseValNow) + fineValNow;
+
+              return (
+                <div
+                  className={`p-3.5 sm:p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
+                    isPaidNow && !hasFineNow
+                      ? 'bg-emerald-50/70 border-emerald-300/70'
+                      : hasFineNow
+                        ? 'bg-red-50/70 border-red-300/80'
+                        : 'bg-surface-container-low border-surface-container-high/70'
+                  }`}
+                >
+                  <div className="flex items-start sm:items-center gap-3 min-w-0">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
+                        isPaidNow && !hasFineNow
+                          ? 'bg-emerald-600 text-white'
+                          : hasFineNow
+                            ? 'bg-red-600 text-white'
+                            : 'bg-navy-deep text-amber-300'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[22px]">
+                        {isPaidNow && !hasFineNow ? 'verified' : 'qr_code_2'}
+                      </span>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-outline">
+                          {isMensal ? 'Mensalidade Oficial' : 'Taxa da Pelada (Avulso)'}
+                        </span>
+                        <span className="text-outline">·</span>
+                        {isGoleiroExempt && !hasFineNow ? (
+                          <span className="text-[11px] font-bold text-emerald-700 uppercase">
+                            Goleiro Isento 🛡️
+                          </span>
+                        ) : isPaidNow && !hasFineNow ? (
+                          <span className="text-[11px] font-bold text-emerald-700 uppercase">
+                            Pagamento Confirmado ✅
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-bold text-amber-800 uppercase">
+                            Aguardando Pagamento ⏳
+                          </span>
+                        )}
+                      </div>
+
+                      <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep mt-0.5">
+                        {isPaidNow && !hasFineNow ? (
+                          isGoleiroExempt ? (
+                            'Goleiros titulares possuem isenção na pelada'
+                          ) : (
+                            `Seu pagamento (${isMensal ? `R$ ${prices.mensalista},00` : `R$ ${prices.avulso},00`}) já está confirmado!`
+                          )
+                        ) : hasFineNow && !isPaidNow ? (
+                          `Total a pagar: R$ ${totalDueNow},00 (${isMensal ? 'Mensal' : 'Pelada'} R$ ${baseValNow} + Multa R$ ${fineValNow})`
+                        ) : hasFineNow ? (
+                          `Você possui uma multa pendente de R$ ${fineValNow},00`
+                        ) : (
+                          `Valor: R$ ${baseValNow},00 • Pague no Pix e envie o comprovante para baixa automática`
+                        )}
+                      </h4>
+
+                      {currentPlayer.lastReceiptSummary && isPaidNow && (
+                        <p className="text-[11px] text-emerald-800 font-medium mt-0.5 truncate">
+                          Último comprovante validado: {currentPlayer.lastReceiptSummary}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {(!isGoleiroExempt || hasFineNow) && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsPixModalOpen(true)}
+                        className={`w-full sm:w-auto min-h-[42px] px-3.5 py-2 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all ${
+                          isPaidNow && !hasFineNow
+                            ? 'bg-white hover:bg-surface-container text-navy-deep border border-emerald-300'
+                            : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white'
+                        }`}
+                      >
+                        <span className="material-symbols-outlined text-[18px]">
+                          {isPaidNow && !hasFineNow ? 'receipt_long' : 'pix'}
+                        </span>
+                        <span>
+                          {isPaidNow && !hasFineNow
+                            ? 'Ver Pix / Enviar Novo Comprovante'
+                            : 'Pagar Pix / Enviar Comprovante'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          )}
         </div>
       </div>
+
+      {/* MODAL DE PAGAMENTO PIX & VERIFICAÇÃO AUTOMÁTICA DE COMPROVANTE */}
+      {currentPlayer && (
+        <PixPaymentModal
+          isOpen={isPixModalOpen}
+          onClose={() => setIsPixModalOpen(false)}
+          player={currentPlayer}
+          match={match}
+          prices={prices}
+          pixConfig={pixConfig}
+          initialSharedFile={sharedReceiptFile}
+          onClearSharedFile={() => setSharedReceiptFile(null)}
+        />
+      )}
 
       {/* MODAL: ABRIR NOVA PELADA / DEFINIR DATA E HORÁRIO (DIRETORIA) */}
       {isOpenPeladaModal && isCurrentUserAdmin && typeof document !== 'undefined' && createPortal(
@@ -997,6 +1168,58 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <span className="text-[11px] text-outline mt-1 block">
                   Aplicado automaticamente a quem colocar o nome na lista e faltar à pelada ou retirar após as 18h.
                 </span>
+              </div>
+
+              <div className="pt-3 border-t border-surface-container-high/50 flex flex-col gap-2.5">
+                <span className="font-label-md text-xs text-emerald-800 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+                  <span>Configuração do Pix Oficial (Recebimento no App)</span>
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <label className="font-label-md text-[11px] text-navy-deep font-bold block mb-1">
+                      Tipo de Chave
+                    </label>
+                    <select
+                      value={pixForm.pixKeyType}
+                      onChange={(e) => setPixForm({ ...pixForm, pixKeyType: e.target.value as any })}
+                      className="w-full h-10 px-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none text-xs text-navy-deep font-bold"
+                    >
+                      <option value="email">E-mail</option>
+                      <option value="cpf">CPF</option>
+                      <option value="cnpj">CNPJ</option>
+                      <option value="phone">Celular</option>
+                      <option value="evp">Chave Aleatória</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="font-label-md text-[11px] text-navy-deep font-bold block mb-1">
+                      Chave Pix Oficial da Pelada
+                    </label>
+                    <input
+                      type="text"
+                      value={pixForm.pixKey}
+                      onChange={(e) => setPixForm({ ...pixForm, pixKey: e.target.value })}
+                      placeholder="Ex: diiogo49@gmail.com ou CPF/Celular"
+                      className="w-full h-10 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none text-xs text-navy-deep font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-label-md text-[11px] text-navy-deep font-bold block mb-1">
+                    Nome do Recebedor (Titular da Conta Pix)
+                  </label>
+                  <input
+                    type="text"
+                    value={pixForm.receiverName}
+                    onChange={(e) => setPixForm({ ...pixForm, receiverName: e.target.value })}
+                    placeholder="Ex: DIOGO / OUSADIA E ALEGRIA"
+                    className="w-full h-10 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none text-xs text-navy-deep font-bold"
+                  />
+                </div>
               </div>
             </div>
 

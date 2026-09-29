@@ -46,5 +46,20 @@
       "url": "/?page=arena-panel",
       "icons": [{ "src": "/pwa-192x192.png?v=20", "sizes": "192x192" }]
     }
-  ]
+  ],
+  "share_target": {
+    "action": "/?share-receipt=1",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "files": [
+        {
+          "name": "receipt",
+          "accept": ["image/*", "application/pdf"]
+        }
+      ]
+    }
+  }
 }

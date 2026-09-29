@@ -31,10 +31,35 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Garantir que ícones, escudo e manifest nunca fiquem presos em cache antigo
+// Garantir que ícones, escudo e manifest nunca fiquem presos em cache antigo + Receber Comprovante Compartilhado (Web Share Target)
 self.addEventListener('fetch', (event) => {
   try {
     const url = new URL(event.request.url);
+
+    // Captura comprovante compartilhado direto do app do banco para o app da pelada
+    if (event.request.method === 'POST' && url.searchParams.has('share-receipt')) {
+      event.respondWith(
+        (async () => {
+          try {
+            const formData = await event.request.formData();
+            const receiptFile = formData.get('receipt');
+            if (receiptFile && typeof receiptFile === 'object') {
+              const cache = await caches.open('oa-shared-receipt-cache');
+              const headers = new Headers({
+                'Content-Type': receiptFile.type || 'image/jpeg',
+                'X-Receipt-Name': encodeURIComponent(receiptFile.name || 'comprovante.jpg')
+              });
+              await cache.put('/__shared-receipt-file', new Response(receiptFile, { headers }));
+            }
+          } catch (err) {
+            console.warn('Erro ao processar comprovante compartilhado no SW:', err);
+          }
+          return Response.redirect('/?shared-receipt=1', 303);
+        })()
+      );
+      return;
+    }
+
     if (
       url.pathname.includes('manifest.json') ||
       url.pathname.includes('pwa-') ||

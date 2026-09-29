@@ -4,6 +4,7 @@ import admin from "firebase-admin";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { analyzeReceiptWithGemini } from "./api/verify-receipt.ts";
 
 dotenv.config();
 
@@ -92,11 +93,35 @@ async function startServer() {
     console.log("ℹ️ Servidor rodando sem credencial FCM server-side. Notificações in-app ativas via client.");
   }
 
-  app.use(express.json());
+  app.use(express.json({ limit: "15mb" }));
 
   // API Health Check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // Validação Inteligente de Comprovante Pix via Gemini Vision (Server-Side)
+  app.post("/api/verify-receipt", async (req, res) => {
+    try {
+      const { base64Data, mimeType, expectedAmount, receiverName, pixKey, playerName } = req.body || {};
+      if (!base64Data) {
+        return res.status(400).json({ error: "Arquivo de comprovante não enviado." });
+      }
+      const result = await analyzeReceiptWithGemini({
+        base64Data,
+        mimeType: mimeType || "image/jpeg",
+        expectedAmount: Number(expectedAmount) || 0,
+        receiverName,
+        pixKey,
+        playerName,
+      });
+      return res.status(200).json(result);
+    } catch (error: any) {
+      console.error("❌ Erro ao validar comprovante Pix:", error);
+      return res.status(500).json({
+        error: error?.message || "Erro ao analisar o comprovante com IA.",
+      });
+    }
   });
 
   // Vite middleware para desenvolvimento

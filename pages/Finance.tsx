@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Player, Page, Expense, Match } from '../types.ts';
+import { Player, Page, Expense, Match, PaymentReceipt, PixConfig } from '../types.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
-import { db, doc, updateDoc, setDoc, onSnapshot, collection, addDoc, deleteDoc } from '../services/firebase.ts';
+import { db, doc, updateDoc, setDoc, onSnapshot, collection, addDoc, deleteDoc, query, orderBy, limit } from '../services/firebase.ts';
+import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
+import { PixPaymentModal } from '../components/PixPaymentModal.tsx';
 
 const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | null, onPageChange: (page: Page) => void }> = ({ players, currentUser, match, onPageChange }) => {
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'todos' | 'pendentes' | 'pagos'>('todos');
-  const [finView, setFinView] = useState<'receitas' | 'despesas' | 'multas'>('receitas');
+  const [finView, setFinView] = useState<'receitas' | 'comprovantes' | 'despesas' | 'multas'>('receitas');
   const [prices, setPrices] = useState(() => {
     try {
       const cached = localStorage.getItem('oa_real_finance_cache');
@@ -22,9 +24,14 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
     } catch {}
     return { mensalista: 60, avulso: 40, multa: 20 };
   });
+  const [pixConfig, setPixConfig] = useState<PixConfig>(DEFAULT_PIX_CONFIG);
+  const [pixForm, setPixForm] = useState<PixConfig>(DEFAULT_PIX_CONFIG);
   const [isEditingPrices, setIsEditingPrices] = useState(false);
   const [priceForm, setPriceForm] = useState({ mensalista: 60, avulso: 40, multa: 20 });
   const [isSavingPrices, setIsSavingPrices] = useState(false);
+  const [receipts, setReceipts] = useState<PaymentReceipt[]>([]);
+  const [previewReceipt, setPreviewReceipt] = useState<PaymentReceipt | null>(null);
+  const [selectedPlayerForPix, setSelectedPlayerForPix] = useState<Player | null>(null);
 
   const [expenses, setExpenses] = useState<Expense[]>(() => {
     try {
@@ -53,10 +60,19 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
           avulso: Number(data.avulso) || 40,
           multa: Number(data.multa) || 20
         };
+        const normalizedPix: PixConfig = {
+          pixKey: data.pixKey || DEFAULT_PIX_CONFIG.pixKey,
+          pixKeyType: data.pixKeyType || DEFAULT_PIX_CONFIG.pixKeyType,
+          receiverName: data.receiverName || DEFAULT_PIX_CONFIG.receiverName,
+          receiverCity: data.receiverCity || DEFAULT_PIX_CONFIG.receiverCity,
+          bankLabel: data.bankLabel || DEFAULT_PIX_CONFIG.bankLabel
+        };
         setPrices(normalized);
         setPriceForm(normalized);
+        setPixConfig(normalizedPix);
+        setPixForm(normalizedPix);
         try {
-          localStorage.setItem('oa_real_finance_cache', JSON.stringify(normalized));
+          localStorage.setItem('oa_real_finance_cache', JSON.stringify({ ...normalized, ...normalizedPix }));
         } catch {}
       }
     });
@@ -69,9 +85,16 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
       } catch {}
     });
 
+    const qReceipts = query(collection(db, "receipts"), orderBy("createdAt", "desc"), limit(50));
+    const unsubReceipts = onSnapshot(qReceipts, (snapshot) => {
+      const receiptList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PaymentReceipt));
+      setReceipts(receiptList);
+    }, () => {});
+
     return () => {
       unsubPrices();
       unsubExpenses();
+      unsubReceipts();
     };
   }, []);
 
@@ -89,6 +112,10 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
         mensalista: Math.max(0, Number(priceForm.mensalista) || 0),
         avulso: Math.max(0, Number(priceForm.avulso) || 0),
         multa: Math.max(0, Number(priceForm.multa) || 0),
+        pixKey: (pixForm.pixKey || DEFAULT_PIX_CONFIG.pixKey).trim(),
+        pixKeyType: pixForm.pixKeyType || 'email',
+        receiverName: (pixForm.receiverName || DEFAULT_PIX_CONFIG.receiverName).trim(),
+        receiverCity: (pixForm.receiverCity || DEFAULT_PIX_CONFIG.receiverCity).trim(),
         updatedAt: new Date().toISOString()
       };
       await setDoc(doc(db, "settings", "finance"), payload, { merge: true });
@@ -102,7 +129,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
         )
       );
       setIsEditingPrices(false);
-      alert("Valores de Mensalista, Avulso e Multa atualizados com sucesso!");
+      alert("Valores e Chave Pix Oficial atualizados com sucesso!");
     } catch {
       alert("Erro ao salvar valores.");
     } finally {
@@ -239,11 +266,11 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
         </div>
       </div>
 
-      {/* TABELA DE VALORES DEFINIDOS PELA DIRETORIA */}
+      {/* TABELA DE VALORES & PIX DEFINIDOS PELA DIRETORIA */}
       <div className="w-full rounded-2xl bg-surface-container-lowest p-3.5 sm:p-4 shadow-xs border border-surface-container-high/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1.5">
           <span className="font-label-caps text-[11px] text-navy-deep font-bold uppercase tracking-wider">
-            TABELA OFICIAL DE VALORES (DIRETORIA)
+            TABELA OFICIAL DE VALORES & PIX (DIRETORIA)
           </span>
           <div className="flex items-center gap-2 flex-wrap text-xs font-semibold text-navy-deep">
             <span className="bg-surface-container px-2.5 py-1 rounded-lg">
@@ -255,34 +282,46 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
             <span className="bg-red-50 text-red-800 border border-red-200 px-2.5 py-1 rounded-lg">
               Multa: <strong>R$ {prices.multa},00</strong>
             </span>
+            <span className="bg-emerald-50 text-emerald-900 border border-emerald-200 px-2.5 py-1 rounded-lg">
+              Pix Oficial: <strong>{pixConfig.pixKey}</strong>
+            </span>
           </div>
         </div>
 
         <button
           onClick={() => {
             setPriceForm(prices);
+            setPixForm(pixConfig);
             setIsEditingPrices(true);
           }}
           className="h-9 px-3.5 rounded-xl bg-navy-deep hover:opacity-95 text-white font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all shrink-0"
         >
           <span className="material-symbols-outlined text-[16px]">tune</span>
-          <span>DEFINIR VALORES</span>
+          <span>VALORES & CHAVE PIX</span>
         </button>
       </div>
 
-      {/* TABS: RECEITAS VS MULTAS VS DESPESAS */}
-      <div className="flex p-1 bg-surface-container-high/60 rounded-xl gap-1">
+      {/* TABS: RECEITAS VS COMPROVANTES VS MULTAS VS DESPESAS */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 p-1 bg-surface-container-high/60 rounded-xl gap-1">
         <button
           onClick={() => setFinView('receitas')}
-          className={`flex-1 py-2.5 rounded-lg font-headline-sm text-xs sm:text-sm transition-all ${
+          className={`py-2.5 px-2 rounded-lg font-headline-sm text-xs transition-all ${
             finView === 'receitas' ? 'bg-surface-container-lowest text-navy-deep shadow-sm font-bold' : 'text-on-surface-variant'
           }`}
         >
           RECEITAS ({filteredPlayers.length})
         </button>
         <button
+          onClick={() => setFinView('comprovantes')}
+          className={`py-2.5 px-2 rounded-lg font-headline-sm text-xs transition-all flex items-center justify-center gap-1 ${
+            finView === 'comprovantes' ? 'bg-emerald-600 text-white shadow-sm font-bold' : 'text-emerald-800 hover:bg-emerald-500/10 font-semibold'
+          }`}
+        >
+          <span>COMPROVANTES ({receipts.length})</span>
+        </button>
+        <button
           onClick={() => setFinView('multas')}
-          className={`flex-1 py-2.5 rounded-lg font-headline-sm text-xs sm:text-sm transition-all flex items-center justify-center gap-1 ${
+          className={`py-2.5 px-2 rounded-lg font-headline-sm text-xs transition-all flex items-center justify-center gap-1 ${
             finView === 'multas' ? 'bg-red-600 text-white shadow-sm font-bold' : 'text-red-700 hover:bg-red-500/10 font-semibold'
           }`}
         >
@@ -290,7 +329,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
         </button>
         <button
           onClick={() => setFinView('despesas')}
-          className={`flex-1 py-2.5 rounded-lg font-headline-sm text-xs sm:text-sm transition-all ${
+          className={`py-2.5 px-2 rounded-lg font-headline-sm text-xs transition-all ${
             finView === 'despesas' ? 'bg-surface-container-lowest text-navy-deep shadow-sm font-bold' : 'text-on-surface-variant'
           }`}
         >
@@ -338,6 +377,11 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                       <p className="font-body-sm text-body-sm text-outline break-words">
                         {player.position} • {player.playerType === 'mensalista' ? 'Mensalista' : 'Avulso'}
                       </p>
+                      {player.lastReceiptSummary && isPaid && (
+                        <p className="text-[11px] text-emerald-700 font-semibold mt-0.5 truncate">
+                          ✓ Comprovante: {player.lastReceiptSummary}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -345,6 +389,17 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                     <span className="font-headline-sm text-headline-sm text-navy-deep">
                       {isExempt ? 'ISENTO' : `R$ ${amount},00`}
                     </span>
+
+                    {!isExempt && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPlayerForPix(player)}
+                        className="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-navy-deep transition-all active:scale-95"
+                        title="Abrir QR Code Pix ou enviar comprovante deste atleta"
+                      >
+                        <span className="material-symbols-outlined text-[17px]">qr_code_2</span>
+                      </button>
+                    )}
 
                     <button
                       onClick={() => !isExempt && togglePaymentStatus(player)}
@@ -360,6 +415,72 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
               );
             })}
           </div>
+        </div>
+      ) : finView === 'comprovantes' ? (
+        /* CONTENT: COMPROVANTES ENVIADOS E VALIDADOS AUTOMATICAMENTE */
+        <div className="flex flex-col gap-2.5">
+          {receipts.length === 0 ? (
+            <div className="p-6 rounded-2xl bg-surface-container-lowest border border-surface-container-high/40 text-center flex flex-col items-center gap-2">
+              <span className="material-symbols-outlined text-emerald-600 text-[32px]">receipt_long</span>
+              <h4 className="font-headline-sm text-sm text-navy-deep font-bold">
+                Nenhum Comprovante Enviado Ainda
+              </h4>
+              <p className="font-body-sm text-xs text-outline max-w-sm">
+                Quando os atletas enviarem ou compartilharem o comprovante Pix direto pelo app, a validação automática e a imagem do comprovante aparecerão aqui.
+              </p>
+            </div>
+          ) : (
+            receipts.map((rec) => (
+              <div
+                key={rec.id}
+                className="p-3.5 rounded-xl bg-surface-container-lowest shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-emerald-300/60"
+              >
+                <div className="flex items-start sm:items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 bg-surface-container border border-emerald-300">
+                    <img
+                      src={rec.playerPhoto || `https://ui-avatars.com/api/?name=${encodeURIComponent(rec.playerName)}&background=003a75&color=fff`}
+                      alt={rec.playerName}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h4 className="font-headline-sm text-sm text-navy-deep font-bold">
+                        {rec.playerName}
+                      </h4>
+                      <span className="text-[11px] font-bold text-emerald-700">
+                        · Validado Automaticamente ✓
+                      </span>
+                    </div>
+                    <p className="text-xs text-outline mt-0.5">
+                      {rec.bankName ? `${rec.bankName} · ` : ''}
+                      {rec.receiptDate || new Date(rec.createdAt).toLocaleDateString('pt-BR')}
+                      {rec.receiptTime ? ` às ${rec.receiptTime}` : ''}
+                      {rec.transactionId ? ` · ID: ${rec.transactionId.slice(0, 12)}` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 shrink-0">
+                  <span className="font-headline-sm text-sm font-bold text-emerald-700">
+                    R$ {Number(rec.extractedAmount || rec.expectedAmount || 0).toFixed(2)}
+                  </span>
+
+                  {rec.receiptPreviewUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setPreviewReceipt(rec)}
+                      className="px-3 py-1.5 rounded-lg bg-navy-deep hover:opacity-95 text-white text-[11px] font-bold flex items-center gap-1 active:scale-95 transition-all"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">visibility</span>
+                      <span>Ver Comprovante</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       ) : finView === 'multas' ? (
         /* CONTENT: MULTAS POR FALTA OU DESISTÊNCIA APÓS AS 18H */
@@ -538,6 +659,58 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                   Valor cobrado automaticamente nas faltas (sem check-in) e desistências após as 18h.
                 </span>
               </div>
+
+              <div className="pt-3 border-t border-surface-container-high/50 flex flex-col gap-2.5">
+                <span className="font-label-md text-xs text-emerald-800 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+                  <span>Chave Pix Oficial (Cobrança no App)</span>
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <label className="font-label-md text-[11px] text-navy-deep font-bold block mb-1">
+                      Tipo de Chave
+                    </label>
+                    <select
+                      value={pixForm.pixKeyType}
+                      onChange={(e) => setPixForm({ ...pixForm, pixKeyType: e.target.value as any })}
+                      className="w-full h-10 px-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none text-xs text-navy-deep font-bold"
+                    >
+                      <option value="email">E-mail</option>
+                      <option value="cpf">CPF</option>
+                      <option value="cnpj">CNPJ</option>
+                      <option value="phone">Celular</option>
+                      <option value="evp">Chave Aleatória</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="font-label-md text-[11px] text-navy-deep font-bold block mb-1">
+                      Chave Pix Oficial
+                    </label>
+                    <input
+                      type="text"
+                      value={pixForm.pixKey}
+                      onChange={(e) => setPixForm({ ...pixForm, pixKey: e.target.value })}
+                      placeholder="Ex: diiogo49@gmail.com"
+                      className="w-full h-10 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none text-xs text-navy-deep font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-label-md text-[11px] text-navy-deep font-bold block mb-1">
+                    Nome do Recebedor (Titular da Conta)
+                  </label>
+                  <input
+                    type="text"
+                    value={pixForm.receiverName}
+                    onChange={(e) => setPixForm({ ...pixForm, receiverName: e.target.value })}
+                    placeholder="Ex: DIOGO / OUSADIA E ALEGRIA"
+                    className="w-full h-10 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none text-xs text-navy-deep font-bold"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-surface-container-high/40 shrink-0">
@@ -610,6 +783,65 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
           </div>
         </div>,
         document.body
+      )}
+      {/* MODAL DE VISUALIZAÇÃO DE COMPROVANTE (AUDITORIA DA DIRETORIA) */}
+      {previewReceipt && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={() => setPreviewReceipt(null)}
+        >
+          <div
+            className="bg-white text-navy-deep rounded-2xl p-4 sm:p-5 w-full max-w-md max-h-[90dvh] shadow-2xl flex flex-col gap-3 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-2.5 shrink-0">
+              <div>
+                <h3 className="font-headline-sm text-sm sm:text-base font-bold text-navy-deep">
+                  Comprovante de {previewReceipt.playerName}
+                </h3>
+                <p className="text-xs text-emerald-700 font-semibold">
+                  Valor Confirmado: R$ {Number(previewReceipt.extractedAmount || previewReceipt.expectedAmount || 0).toFixed(2)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewReceipt(null)}
+                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 min-h-0 flex flex-col gap-2.5 items-center bg-surface-container-low p-2 rounded-xl">
+              {previewReceipt.receiptPreviewUrl && (
+                <img
+                  src={previewReceipt.receiptPreviewUrl}
+                  alt="Comprovante Pix"
+                  className="max-w-full max-h-[60dvh] object-contain rounded-lg shadow-xs"
+                />
+              )}
+              {previewReceipt.summary && (
+                <p className="text-xs text-navy-deep bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl w-full">
+                  {previewReceipt.summary}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* MODAL PIX PARA ATLETA SELECIONADO PELA DIRETORIA */}
+      {selectedPlayerForPix && (
+        <PixPaymentModal
+          isOpen={Boolean(selectedPlayerForPix)}
+          onClose={() => setSelectedPlayerForPix(null)}
+          player={selectedPlayerForPix}
+          match={match}
+          prices={prices}
+          pixConfig={pixConfig}
+        />
       )}
     </div>
   );

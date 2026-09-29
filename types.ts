@@ -25,6 +25,10 @@ export interface Player {
   // Fix: Adding financial tracking properties used in Ranking.tsx
   monthlyPaid?: boolean;
   paymentStatus?: 'pago' | 'pendente';
+  lastPaymentAt?: string;
+  lastPaymentAmount?: number;
+  lastReceiptId?: string;
+  lastReceiptSummary?: string;
   pushEnabled?: boolean;
   fcmToken?: string | null;
   suplenteNextMatch?: boolean;
@@ -34,6 +38,37 @@ export interface Player {
   fineAmount?: number;
   fineReason?: string;
   lastParticipatedAt?: string;
+}
+
+export interface PaymentReceipt {
+  id: string;
+  playerId: string;
+  playerName: string;
+  playerPhoto?: string;
+  playerType: 'mensalista' | 'avulso';
+  paymentType: 'avulso' | 'mensalista' | 'multa' | 'avulso_com_multa' | 'mensalista_com_multa';
+  expectedAmount: number;
+  extractedAmount: number;
+  payerName?: string;
+  receiverName?: string;
+  bankName?: string;
+  transactionId?: string;
+  receiptDate?: string;
+  receiptTime?: string;
+  summary?: string;
+  receiptPreviewUrl?: string;
+  verifiedByAi: boolean;
+  matchId?: string;
+  matchDate?: string;
+  createdAt: string;
+}
+
+export interface PixConfig {
+  pixKey: string;
+  pixKeyType: 'cpf' | 'cnpj' | 'email' | 'phone' | 'evp';
+  receiverName: string;
+  receiverCity: string;
+  bankLabel?: string;
 }
 
 export interface Expense {
