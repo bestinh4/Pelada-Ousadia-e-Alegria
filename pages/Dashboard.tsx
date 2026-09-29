@@ -6,7 +6,7 @@ import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
-import { PixPaymentModal } from '../components/PixPaymentModal.tsx';
+import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
 import { playSound } from '../utils/sound.ts';
 
 interface DashboardProps {
@@ -571,7 +571,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               className="min-h-[44px] py-2.5 px-3 bg-navy-deep hover:opacity-95 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
               title="Definir valores de Avulsos, Mensalistas, Multas e Chave Pix"
             >
-              <span className="material-symbols-outlined text-[18px] shrink-0">payments</span>
+              <PixIcon className="w-4 h-4" color="#32BCAD" />
               <span className="truncate">VALORES & PIX</span>
             </button>
           </div>
@@ -781,12 +781,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                           ? 'bg-emerald-600 text-white'
                           : hasFineNow
                             ? 'bg-red-600 text-white'
-                            : 'bg-navy-deep text-amber-300'
+                            : 'bg-[#32BCAD]/15 text-[#32BCAD] border border-[#32BCAD]/30'
                       }`}
                     >
-                      <span className="material-symbols-outlined text-[22px]">
-                        {isPaidNow && !hasFineNow ? 'verified' : 'qr_code_2'}
-                      </span>
+                      {isPaidNow && !hasFineNow ? (
+                        <span className="material-symbols-outlined text-[22px]">verified</span>
+                      ) : (
+                        <PixIcon className="w-5 h-5" color={hasFineNow ? '#ffffff' : '#32BCAD'} />
+                      )}
                     </div>
 
                     <div className="min-w-0">
@@ -835,23 +837,24 @@ const Dashboard: React.FC<DashboardProps> = ({
                   </div>
 
                   {(!isGoleiroExempt || hasFineNow) && (
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
                       <button
                         type="button"
                         onClick={() => setIsPixModalOpen(true)}
-                        className={`w-full sm:w-auto min-h-[42px] px-3.5 py-2 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all ${
+                        className={`w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all ${
                           isPaidNow && !hasFineNow
                             ? 'bg-white hover:bg-surface-container text-navy-deep border border-emerald-300'
-                            : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white'
+                            : 'bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25'
                         }`}
                       >
-                        <span className="material-symbols-outlined text-[18px]">
-                          {isPaidNow && !hasFineNow ? 'receipt_long' : 'pix'}
-                        </span>
+                        <PixIcon
+                          className="w-4 h-4"
+                          color={isPaidNow && !hasFineNow ? '#32BCAD' : '#ffffff'}
+                        />
                         <span>
                           {isPaidNow && !hasFineNow
-                            ? 'Ver Pix / Enviar Novo Comprovante'
-                            : 'Pagar Pix / Enviar Comprovante'}
+                            ? 'Ver Pix / Novo Comprovante'
+                            : 'Pagar com Pix / Comprovante'}
                         </span>
                       </button>
                     </div>
@@ -1172,7 +1175,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               <div className="pt-3 border-t border-surface-container-high/50 flex flex-col gap-2.5">
                 <span className="font-label-md text-xs text-emerald-800 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+                  <PixIcon className="w-4 h-4" color="#32BCAD" />
                   <span>Configuração do Pix Oficial (Recebimento no App)</span>
                 </span>
 

@@ -4,7 +4,7 @@ import { Player, Page, Expense, Match, PaymentReceipt, PixConfig } from '../type
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { db, doc, updateDoc, setDoc, onSnapshot, collection, addDoc, deleteDoc, query, orderBy, limit } from '../services/firebase.ts';
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
-import { PixPaymentModal } from '../components/PixPaymentModal.tsx';
+import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
 
 const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | null, onPageChange: (page: Page) => void }> = ({ players, currentUser, match, onPageChange }) => {
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -296,7 +296,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
           }}
           className="h-9 px-3.5 rounded-xl bg-navy-deep hover:opacity-95 text-white font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all shrink-0"
         >
-          <span className="material-symbols-outlined text-[16px]">tune</span>
+          <PixIcon className="w-4 h-4" color="#32BCAD" />
           <span>VALORES & CHAVE PIX</span>
         </button>
       </div>
@@ -394,10 +394,11 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                       <button
                         type="button"
                         onClick={() => setSelectedPlayerForPix(player)}
-                        className="p-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-navy-deep transition-all active:scale-95"
+                        className="px-2.5 py-1 rounded-lg bg-[#32BCAD]/15 hover:bg-[#32BCAD]/25 text-navy-deep border border-[#32BCAD]/30 transition-all active:scale-95 flex items-center gap-1 font-label-md text-[11px] font-bold"
                         title="Abrir QR Code Pix ou enviar comprovante deste atleta"
                       >
-                        <span className="material-symbols-outlined text-[17px]">qr_code_2</span>
+                        <PixIcon className="w-3.5 h-3.5" color="#32BCAD" />
+                        <span>Pix</span>
                       </button>
                     )}
 
@@ -662,7 +663,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
 
               <div className="pt-3 border-t border-surface-container-high/50 flex flex-col gap-2.5">
                 <span className="font-label-md text-xs text-emerald-800 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[16px]">qr_code_2</span>
+                  <PixIcon className="w-4 h-4" color="#32BCAD" />
                   <span>Chave Pix Oficial (Cobrança no App)</span>
                 </span>
 
