@@ -596,7 +596,7 @@ const App: React.FC = () => {
         {user && activePage === Page.Finance && <Finance players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
         {user && activePage === Page.CreateMatch && <CreateMatch user={user} onPageChange={setCurrentPage} />}
         {user && (activePage === Page.TeamBalancing || activePage === Page.ArenaPanel) && (
-          <TeamBalancing players={players} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />
+          <TeamBalancing players={players} match={currentMatch} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />
         )}
         {user && activePage === Page.Profile && (
           <Profile 

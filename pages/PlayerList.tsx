@@ -26,6 +26,40 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
   });
   const [isSavingStats, setIsSavingStats] = useState(false);
   const [copiedFeedback, setCopiedFeedback] = useState(false);
+  const [isEditingMatchDate, setIsEditingMatchDate] = useState(false);
+  const [tempMatchDate, setTempMatchDate] = useState(match?.date || '');
+
+  useEffect(() => {
+    if (match?.date) setTempMatchDate(match.date);
+  }, [match?.date]);
+
+  const handleSaveNewMatchDate = async (newDate: string) => {
+    if (!isCurrentUserAdmin || !newDate) return;
+    try {
+      const now = new Date().toISOString();
+      if (match?.id) {
+        await updateDoc(doc(db, "matches", match.id), {
+          date: newDate,
+          createdAt: now
+        });
+      } else {
+        await addDoc(collection(db, "matches"), {
+          location: 'Granja Cantinho do Céu',
+          date: newDate,
+          time: '20:00',
+          type: 'Mini-Campo',
+          price: 40,
+          fieldSlots: 30,
+          gkSlots: 4,
+          confirmedPlayers: 0,
+          createdAt: now
+        });
+      }
+      setIsEditingMatchDate(false);
+    } catch {
+      alert("Erro ao atualizar a data da pelada.");
+    }
+  };
 
   const adminUser = players.find(p => 
     (currentUser?.uid && p.id === currentUser.uid) || 
@@ -256,9 +290,60 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
               <span className="material-symbols-outlined text-[22px]">groups</span>
             </div>
             <div className="min-w-0">
-              <h2 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold truncate">
-                Lista Oficial • {confirmed.length}/{totalSlots} Confirmados
-              </h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold truncate">
+                  Lista Oficial • {confirmed.length}/{totalSlots} Confirmados
+                </h2>
+                {isEditingMatchDate && isCurrentUserAdmin ? (
+                  <div className="inline-flex items-center gap-1 bg-surface-container px-2 py-0.5 rounded-lg border border-primary-container/40">
+                    <input
+                      type="date"
+                      value={tempMatchDate}
+                      onChange={(e) => setTempMatchDate(e.target.value)}
+                      className="text-xs font-bold text-navy-deep bg-transparent outline-none cursor-pointer"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveNewMatchDate(tempMatchDate)}
+                      className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold"
+                    >
+                      Salvar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingMatchDate(false)}
+                      className="px-1.5 py-0.5 rounded bg-surface-container-high text-navy-deep text-[10px] font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-primary-container/10 text-primary-container text-[11px] font-bold">
+                      <span className="material-symbols-outlined text-[13px]">event</span>
+                      <span>
+                        {match?.date
+                          ? new Date(match.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                          : 'Definir Data'}
+                      </span>
+                    </span>
+                    {isCurrentUserAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTempMatchDate(match?.date || new Date().toISOString().split('T')[0]);
+                          setIsEditingMatchDate(true);
+                        }}
+                        className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 text-[10px] font-bold transition-all active:scale-95"
+                        title="Alterar data da pelada"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">edit_calendar</span>
+                        <span>Mudar Data</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
               <p className="font-body-sm text-xs text-outline truncate">
                 {remainingSlots === 0 
                   ? 'Vagas completas • Novos confirmados entram na suplência'

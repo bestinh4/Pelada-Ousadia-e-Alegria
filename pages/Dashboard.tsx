@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, Player, Page } from '../types.ts';
-import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc } from '../services/firebase.ts';
+import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
@@ -40,6 +40,13 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Admin Quick Actions states
   const [isReleasingList, setIsReleasingList] = useState(false);
+  const [isOpenPeladaModal, setIsOpenPeladaModal] = useState(false);
+  const [peladaModalMode, setPeladaModalMode] = useState<'new_list' | 'edit_date'>('new_list');
+  const [nextPeladaForm, setNextPeladaForm] = useState({
+    date: '',
+    time: '20:00',
+    location: 'Granja Cantinho do Céu'
+  });
   const [isSendingPendingPush, setIsSendingPendingPush] = useState(false);
   const [lastAutoEveSentAt, setLastAutoEveSentAt] = useState<string | null>(null);
   const [isAddingManual, setIsAddingManual] = useState(false);
@@ -182,60 +189,155 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // Liberar Lista para a Próxima Pelada
-  const handleReleaseNextPelada = async () => {
+  // Helpers de data para sugerir a próxima pelada sem repetir a data antiga
+  const formatLocalIsoDate = (d: Date): string => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getNextSaturdayIso = (): string => {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Dom, 6 = Sáb
+    let daysUntilSat = (6 - dayOfWeek + 7) % 7;
+    if (daysUntilSat === 0) daysUntilSat = 7;
+    const nextSat = new Date(now);
+    nextSat.setDate(now.getDate() + daysUntilSat);
+    return formatLocalIsoDate(nextSat);
+  };
+
+  const getPlus7DaysFromLastIso = (): string => {
+    if (match?.date) {
+      const base = new Date(match.date + 'T12:00:00');
+      if (!isNaN(base.getTime())) {
+        base.setDate(base.getDate() + 7);
+        const candidate = formatLocalIsoDate(base);
+        const todayIso = formatLocalIsoDate(new Date());
+        if (candidate >= todayIso) return candidate;
+      }
+    }
+    return getNextSaturdayIso();
+  };
+
+  // Abrir modal para Liberar Lista da Nova Pelada (exigindo/permitindo definir a nova data)
+  const handleReleaseNextPelada = () => {
     if (!isCurrentUserAdmin) return;
-    
-    const mensalistasToConfirm = players.filter(p => p.playerType === 'mensalista' && !p.suplenteNextMatch);
-    const mensalistasPenalized = players.filter(p => p.playerType === 'mensalista' && p.suplenteNextMatch);
-    
-    const confirmMsg = `Deseja LIBERAR A LISTA PARA A PRÓXIMA PELADA?\n\n` +
-      `✅ ${mensalistasToConfirm.length} Mensalista(s) serão confirmados automaticamente.\n` +
-      (mensalistasPenalized.length > 0 ? `⚠️ ${mensalistasPenalized.length} Mensalista(s) faltoso(s) ficarão na suplência por penalidade: ${mensalistasPenalized.map(m => m.name).join(', ')}.\n` : '') +
-      `🔄 Todos os atletas avulsos voltarão para o status "Pendente".\n\n` +
-      `Confirma a liberação oficial da lista?`;
-      
-    if (!confirm(confirmMsg)) return;
+    const suggestedDate = getPlus7DaysFromLastIso();
+    setPeladaModalMode('new_list');
+    setNextPeladaForm({
+      date: suggestedDate,
+      time: match?.time || '20:00',
+      location: displayLocation || 'Granja Cantinho do Céu'
+    });
+    setIsOpenPeladaModal(true);
+  };
+
+  // Abrir modal apenas para corrigir/alterar a data e horário da pelada atual sem resetar a lista
+  const handleOpenEditPeladaDate = () => {
+    if (!isCurrentUserAdmin) return;
+    setPeladaModalMode('edit_date');
+    setNextPeladaForm({
+      date: match?.date || getNextSaturdayIso(),
+      time: match?.time || '20:00',
+      location: displayLocation || 'Granja Cantinho do Céu'
+    });
+    setIsOpenPeladaModal(true);
+  };
+
+  // Salvar Nova Pelada (com nova data + liberação da lista) ou Apenas Atualizar Data/Horário
+  const handleConfirmSavePelada = async () => {
+    if (!isCurrentUserAdmin) return;
+    if (!nextPeladaForm.date) {
+      alert("Por favor, selecione a data da pelada!");
+      return;
+    }
 
     setIsReleasingList(true);
     try {
       const now = new Date().toISOString();
-      const promises = players.map(async (p) => {
-        if (p.playerType === 'mensalista') {
-          if (!p.suplenteNextMatch) {
-            return updateDoc(doc(db, "players", p.id), {
-              status: 'presente',
-              confirmedAt: now
-            });
+      const cleanLocation = nextPeladaForm.location.trim() || 'Granja Cantinho do Céu';
+      const cleanTime = nextPeladaForm.time || '20:00';
+      const cleanDate = nextPeladaForm.date;
+
+      const matchPayload = {
+        location: cleanLocation,
+        date: cleanDate,
+        time: cleanTime,
+        type: 'Mini-Campo',
+        price: prices.avulso || 40,
+        fieldSlots: 30,
+        gkSlots: 4,
+        createdAt: now
+      };
+
+      // Atualiza o documento atual (se existir) E garante que seja o mais recente para sincronizar em todos os aparelhos
+      if (match?.id) {
+        await updateDoc(doc(db, "matches", match.id), matchPayload);
+      } else {
+        await addDoc(collection(db, "matches"), {
+          ...matchPayload,
+          confirmedPlayers: 0
+        });
+      }
+
+      const formattedDateBr = new Date(cleanDate + 'T12:00:00').toLocaleDateString('pt-BR', {
+        weekday: 'long',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+
+      if (peladaModalMode === 'new_list') {
+        // Atualizar todos os atletas para a nova pelada (Mensalistas regulares -> presente; Avulsos e Penalizados -> pendente)
+        const promises = players.map(async (p) => {
+          if (p.playerType === 'mensalista') {
+            if (!p.suplenteNextMatch) {
+              return updateDoc(doc(db, "players", p.id), {
+                status: 'presente',
+                confirmedAt: now,
+                courtCheckIn: false
+              });
+            } else {
+              return updateDoc(doc(db, "players", p.id), {
+                status: 'pendente',
+                confirmedAt: null,
+                courtCheckIn: false
+              });
+            }
           } else {
             return updateDoc(doc(db, "players", p.id), {
               status: 'pendente',
-              confirmedAt: null
+              confirmedAt: null,
+              courtCheckIn: false
             });
           }
-        } else {
-          return updateDoc(doc(db, "players", p.id), {
-            status: 'pendente',
-            confirmedAt: null
-          });
-        }
-      });
+        });
 
-      await Promise.all(promises);
+        await Promise.all(promises);
 
-      // Disparar notificação para todos
-      try {
-        await broadcastNotification(
-          "⚽ LISTA DA PELADA LIBERADA!",
-          "A lista oficial para a próxima pelada está aberta! Mensalistas já foram confirmados automaticamente.",
-          user?.uid
-        );
-      } catch {}
+        // Garantir que nenhuma sessão antiga de times fique presa como ativa
+        await deleteDoc(doc(db, "sessions", "current")).catch(() => {});
+        localStorage.removeItem('oa_real_session_cache');
 
-      alert("Lista da próxima pelada liberada com sucesso! Mensalistas confirmados e notificações disparadas.");
+        // Disparar notificação oficial com a nova data
+        try {
+          await broadcastNotification(
+            "⚽ NOVA PELADA ABERTA!",
+            `Lista liberada para ${formattedDateBr} às ${cleanTime} (${cleanLocation})! Mensalistas já confirmados.`,
+            user?.uid
+          );
+        } catch {}
+
+        setIsOpenPeladaModal(false);
+        alert(`✅ Nova pelada aberta para ${formattedDateBr} às ${cleanTime}!\n\nA data foi atualizada, os mensalistas foram confirmados e a lista está pronta.`);
+      } else {
+        setIsOpenPeladaModal(false);
+        alert(`✅ Data e horário da pelada atualizados para ${formattedDateBr} às ${cleanTime}!`);
+      }
     } catch (e) {
       console.error(e);
-      alert("Erro ao liberar lista da próxima pelada.");
+      alert("Erro ao salvar a data da pelada.");
     } finally {
       setIsReleasingList(false);
     }
@@ -500,9 +602,22 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {displayLocation}
                   </h2>
                 </div>
-                <p className="text-xs text-white/85 pl-6 truncate">
-                  {match?.date ? new Date(match.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' }) : 'Sábado'}
-                </p>
+                <div className="flex items-center gap-2 pl-6 flex-wrap">
+                  <p className="text-xs text-white/90 font-semibold truncate">
+                    {match?.date ? new Date(match.date + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'long', year: 'numeric' }) : 'Sábado'}
+                  </p>
+                  {isCurrentUserAdmin && (
+                    <button
+                      type="button"
+                      onClick={handleOpenEditPeladaDate}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-400 hover:bg-amber-300 text-slate-950 text-[10px] font-bold uppercase tracking-wide shadow-xs active:scale-95 transition-all"
+                      title="Alterar a data ou horário desta pelada"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">edit_calendar</span>
+                      <span>Alterar Data</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md px-2.5 py-1 rounded-lg text-xs font-bold self-start sm:self-auto shrink-0 border border-white/15">
@@ -590,6 +705,224 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MODAL: ABRIR NOVA PELADA / DEFINIR DATA E HORÁRIO (DIRETORIA) */}
+      {isOpenPeladaModal && isCurrentUserAdmin && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsOpenPeladaModal(false);
+          }}
+        >
+          <div
+            className="bg-white text-navy-deep max-w-md w-full max-h-[90dvh] rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-3.5 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-700 flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-[22px]">calendar_month</span>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold truncate">
+                    {peladaModalMode === 'new_list' ? 'Abrir Nova Pelada & Definir Data' : 'Alterar Data e Horário da Pelada'}
+                  </h3>
+                  <p className="text-[11px] text-outline truncate">
+                    Escolha a data oficial da pelada para atualizar o painel e a lista
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOpenPeladaModal(false)}
+                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep shrink-0"
+              >
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+
+            {/* Alternador de Modo: Abrir Nova Lista vs Apenas Alterar Data */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-surface-container-low border border-surface-container-high/50 shrink-0">
+              <button
+                type="button"
+                onClick={() => setPeladaModalMode('new_list')}
+                className={`py-2 px-2.5 rounded-lg font-headline-sm text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  peladaModalMode === 'new_list'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-navy-deep hover:bg-surface-container'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">rule_folder</span>
+                <span>Abrir Nova Lista</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeladaModalMode('edit_date')}
+                className={`py-2 px-2.5 rounded-lg font-headline-sm text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                  peladaModalMode === 'edit_date'
+                    ? 'bg-navy-deep text-white shadow-xs'
+                    : 'text-navy-deep hover:bg-surface-container'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[16px]">edit_calendar</span>
+                <span>Só Mudar Data</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 overflow-y-auto min-h-0 flex-1 pr-1">
+              {/* Campo de Data da Nova Pelada + Atalhos Rápidos */}
+              <div className="p-3 rounded-xl bg-surface-container-low border border-surface-container-high/60 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-label-md text-xs text-navy-deep font-bold flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[16px] text-primary-container">event</span>
+                    <span>DATA DA NOVA PELADA</span>
+                  </label>
+                  {match?.date && (
+                    <span className="text-[10px] text-outline font-medium">
+                      Anterior: {new Date(match.date + 'T12:00:00').toLocaleDateString('pt-BR')}
+                    </span>
+                  )}
+                </div>
+
+                <input
+                  type="date"
+                  value={nextPeladaForm.date}
+                  onChange={(e) => setNextPeladaForm({ ...nextPeladaForm, date: e.target.value })}
+                  className="w-full h-11 px-3.5 rounded-xl bg-white border-2 border-primary-container/40 focus:border-primary-container outline-none font-headline-sm text-sm text-navy-deep font-bold cursor-pointer"
+                />
+
+                {/* Atalhos rápidos de data */}
+                <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                  <span className="text-[10px] font-bold text-outline uppercase mr-1">Atalhos:</span>
+                  <button
+                    type="button"
+                    onClick={() => setNextPeladaForm({ ...nextPeladaForm, date: getNextSaturdayIso() })}
+                    className="px-2.5 py-1 rounded-lg bg-white hover:bg-surface-container text-navy-deep border border-surface-container-high text-[11px] font-bold active:scale-95 transition-all"
+                  >
+                    Próximo Sábado
+                  </button>
+                  {match?.date && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date(match.date + 'T12:00:00');
+                        if (!isNaN(d.getTime())) {
+                          d.setDate(d.getDate() + 7);
+                          setNextPeladaForm({ ...nextPeladaForm, date: formatLocalIsoDate(d) });
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-surface-container text-navy-deep border border-surface-container-high text-[11px] font-bold active:scale-95 transition-all"
+                    >
+                      +7 Dias da Última
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setNextPeladaForm({ ...nextPeladaForm, date: formatLocalIsoDate(new Date()) })}
+                    className="px-2.5 py-1 rounded-lg bg-white hover:bg-surface-container text-navy-deep border border-surface-container-high text-[11px] font-bold active:scale-95 transition-all"
+                  >
+                    Hoje
+                  </button>
+                </div>
+              </div>
+
+              {/* Horário e Local */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                <div className="sm:col-span-5">
+                  <label className="font-label-md text-xs text-navy-deep font-bold block mb-1">
+                    HORÁRIO DE INÍCIO
+                  </label>
+                  <input
+                    type="time"
+                    value={nextPeladaForm.time}
+                    onChange={(e) => setNextPeladaForm({ ...nextPeladaForm, time: e.target.value })}
+                    className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-sm text-navy-deep font-bold cursor-pointer"
+                  />
+                </div>
+
+                <div className="sm:col-span-7">
+                  <label className="font-label-md text-xs text-navy-deep font-bold block mb-1">
+                    LOCAL DA PELADA
+                  </label>
+                  <input
+                    type="text"
+                    value={nextPeladaForm.location}
+                    onChange={(e) => setNextPeladaForm({ ...nextPeladaForm, location: e.target.value })}
+                    placeholder="Granja Cantinho do Céu"
+                    className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-sm text-navy-deep font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* Resumo do que acontecerá ao confirmar */}
+              {peladaModalMode === 'new_list' ? (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs space-y-1.5">
+                  <p className="font-bold flex items-center gap-1.5 text-emerald-900">
+                    <span className="material-symbols-outlined text-[16px] text-emerald-600">check_circle</span>
+                    <span>O que será feito ao confirmar:</span>
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 text-[11px] text-emerald-900/90">
+                    <li>
+                      A data da pelada será atualizada para{' '}
+                      <strong>
+                        {nextPeladaForm.date
+                          ? new Date(nextPeladaForm.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })
+                          : 'a data escolhida'}
+                      </strong>.
+                    </li>
+                    <li>
+                      <strong>{players.filter(p => p.playerType === 'mensalista' && !p.suplenteNextMatch).length} Mensalista(s)</strong> serão confirmados automaticamente na lista.
+                    </li>
+                    {players.filter(p => p.playerType === 'mensalista' && p.suplenteNextMatch).length > 0 && (
+                      <li className="text-amber-900 font-semibold">
+                        {players.filter(p => p.playerType === 'mensalista' && p.suplenteNextMatch).length} Mensalista(s) penalizado(s) ficarão na suplência.
+                      </li>
+                    )}
+                    <li>Todos os atletas avulsos ficarão com status &quot;Pendente&quot; para confirmar presença.</li>
+                  </ul>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-navy-deep text-xs">
+                  <p className="font-semibold">
+                    ℹ️ Apenas a data, horário e local serão atualizados. As confirmações de presença atuais da lista serão mantidas.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Botões de Ação */}
+            <div className="flex justify-end gap-2 pt-3 border-t border-surface-container-high/40 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsOpenPeladaModal(false)}
+                className="px-4 py-2.5 rounded-xl bg-surface-container-high text-on-surface font-label-md text-xs font-bold active:scale-95"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSavePelada}
+                disabled={isReleasingList || !nextPeladaForm.date}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-md active:scale-95 transition-all disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[17px]">
+                  {peladaModalMode === 'new_list' ? 'campaign' : 'save'}
+                </span>
+                <span>
+                  {isReleasingList
+                    ? 'Salvando...'
+                    : peladaModalMode === 'new_list'
+                      ? 'Abrir Nova Pelada & Liberar Lista'
+                      : 'Salvar Nova Data'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* MODAL: DEFINIR VALORES DE AVULSOS, MENSALISTAS E MULTAS (DIRETORIA) */}
       {isEditingPrices && isCurrentUserAdmin && typeof document !== 'undefined' && createPortal(

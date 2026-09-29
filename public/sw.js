@@ -15,7 +15,7 @@ const messaging = firebase.messaging();
 
 console.log("🛠️ Service Worker carregado!");
 
-const CACHE_NAME = 'oa-elite-pro-v18';
+const CACHE_NAME = 'oa-elite-pro-v19';
 
 self.addEventListener('install', () => {
   self.skipWaiting();

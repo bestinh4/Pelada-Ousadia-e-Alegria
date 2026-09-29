@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Player, Page } from '../types.ts';
+import { Player, Page, Match } from '../types.ts';
 import { MatchSession, Team } from '../domain/types.ts';
 import { db, doc, setDoc, onSnapshot, deleteDoc, updateDoc, collection, addDoc } from '../services/firebase.ts';
 import { motion, AnimatePresence } from 'motion/react';
@@ -10,6 +10,7 @@ import { playSound } from '../utils/sound.ts';
 
 interface TeamBalancingProps {
   players: Player[];
+  match?: Match | null;
   user?: any;
   currentUserRole?: 'admin' | 'player';
   onPageChange: (page: Page) => void;
@@ -25,6 +26,7 @@ const TEAM_THEMES = [
 
 const TeamBalancing: React.FC<TeamBalancingProps> = ({ 
   players = [], 
+  match,
   user, 
   currentUserRole, 
   onPageChange 
@@ -337,6 +339,8 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     const newSession: MatchSession = {
       id: "current",
       status: "waiting",
+      matchDate: match?.date || new Date().toISOString().split('T')[0],
+      location: match?.location || "Granja Cantinho do Céu",
       teams: teams,
       waitingQueue: teams.slice(2).map(t => t.id),
       activeMatch: {
@@ -834,7 +838,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       const exemptNoShowIds: string[] = [];
       const nowTs = Date.now();
       const nowIso = new Date(nowTs).toISOString();
-      const matchDateStr = nowIso.split('T')[0];
+      const matchDateStr = session.matchDate || match?.date || nowIso.split('T')[0];
       const historyId = `history_${nowTs}`;
 
       const convokedIdSet = new Set<string>();
@@ -1031,7 +1035,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       const prevPartSet = new Set(target.summary?.participatedIds || []);
       const nowTs = Date.now();
       const nowIso = new Date(nowTs).toISOString();
-      const matchDateStr = target.matchDate || nowIso.split('T')[0];
+      const matchDateStr = target.matchDate || match?.date || nowIso.split('T')[0];
       const historyId = isEditingHistory ? target.id : `history_${nowTs}`;
       const convokedIdSet = new Set<string>();
 
