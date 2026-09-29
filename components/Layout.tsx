@@ -56,12 +56,13 @@ const Layout: React.FC<LayoutProps> = ({
             onClick={() => onPageChange(Page.Dashboard)}
             className="flex items-center gap-2.5 cursor-pointer select-none active:scale-[0.98] transition-transform duration-150 group min-w-0"
           >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-primary-container via-primary-bright to-navy-deep p-[2px] flex items-center justify-center shadow-sm shrink-0">
-              <div className="w-full h-full bg-surface-container-lowest rounded-[10px] flex items-center justify-center p-1 overflow-hidden">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep p-[2px] flex items-center justify-center shadow-sm shrink-0">
+              <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center p-0.5 overflow-hidden">
                 <img 
                   src={MAIN_LOGO_URL} 
                   alt="Ousadia & Alegria" 
-                  className="w-full h-full object-contain"
+                  className="w-full h-full object-contain rounded-[8px]"
+                  referrerPolicy="no-referrer"
                 />
               </div>
             </div>

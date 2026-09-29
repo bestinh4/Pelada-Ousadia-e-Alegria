@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { Match, Player, Page } from '../types.ts';
 import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
-import { getNotificationStatus, requestNotificationPermission, broadcastNotification } from '../services/notificationService.ts';
-import { isLateRemovalTime, checkLateRemovalDeadline } from '../utils/timeUtils.ts';
+import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
+import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
 import { playSound } from '../utils/sound.ts';
 
 interface DashboardProps {
@@ -40,6 +40,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Admin Quick Actions states
   const [isReleasingList, setIsReleasingList] = useState(false);
+  const [isSendingPendingPush, setIsSendingPendingPush] = useState(false);
+  const [lastAutoEveSentAt, setLastAutoEveSentAt] = useState<string | null>(null);
   const [isAddingManual, setIsAddingManual] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isEditingPrices, setIsEditingPrices] = useState(false);
@@ -263,11 +265,101 @@ const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  useEffect(() => {
+    const unsubReminders = onSnapshot(doc(db, "settings", "reminders"), (snap) => {
+      if (snap.exists()) {
+        setLastAutoEveSentAt(snap.data()?.lastAutoEveSentAt || null);
+      }
+    }, () => {});
+    return () => unsubReminders();
+  }, []);
+
+  const pendingPlayersList = players.filter(p => p.status === 'pendente');
+  const eveInfo = checkMatchEveInfo(match);
+
+  const handleSendReminderToPending = async () => {
+    if (!isCurrentUserAdmin || isSendingPendingPush) return;
+    if (pendingPlayersList.length === 0) {
+      alert("Todos os atletas já responderam à convocação (nenhum pendente no momento)!");
+      return;
+    }
+
+    setIsSendingPendingPush(true);
+    try {
+      await sendPendingAthletesReminder(match, user?.uid, eveInfo.isEve);
+      await setDoc(doc(db, "settings", "reminders"), {
+        lastManualReminderAt: new Date().toISOString(),
+        pendingCountAtSend: pendingPlayersList.length
+      }, { merge: true }).catch(() => {});
+      alert(`🔔 Lembrete Push enviado com sucesso para os ${pendingPlayersList.length} atleta(s) com status PENDENTE!`);
+    } catch {
+      alert("Erro ao enviar lembrete push.");
+    } finally {
+      setIsSendingPendingPush(false);
+    }
+  };
+
   return (
     <div className="flex flex-col w-full max-w-3xl mx-auto pb-6 gap-4 animate-fade-in">
+      {/* BANNER DE LEMBRETE DE VÉSPERA PARA ATLETAS COM STATUS PENDENTE */}
+      {!isConfirmed && !isRefused && (
+        <div className={`w-full rounded-2xl p-3.5 sm:p-4 shadow-sm border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+          eveInfo.isEve
+            ? 'bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-red-500/10 border-amber-500/50'
+            : 'bg-amber-50/80 border-amber-300/70'
+        }`}>
+          <div className="flex items-start sm:items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <span className="material-symbols-outlined text-[22px]">notifications_active</span>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-900 font-label-md text-[10px] font-bold uppercase tracking-wider">
+                  {eveInfo.isEve ? '⏰ VÉSPERA DA PELADA' : '⚠️ STATUS PENDENTE'}
+                </span>
+                <span className="text-[11px] font-semibold text-amber-900">
+                  Prazo limite: 18h da véspera
+                </span>
+              </div>
+              <h3 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep mt-0.5">
+                {eveInfo.isEve
+                  ? `Amanhã tem pelada (${eveInfo.matchTime}) e sua presença ainda está pendente!`
+                  : 'Você ainda não confirmou sua presença para a próxima pelada!'}
+              </h3>
+              <p className="text-[11px] text-outline leading-snug">
+                Confirme agora para garantir sua vaga na lista antes do sorteio das equipes.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {getNotificationStatus() === 'default' && (
+              <button
+                type="button"
+                onClick={() => requestNotificationPermission(user?.uid)}
+                className="min-h-[40px] px-3 py-2 rounded-xl bg-white hover:bg-surface-container text-navy-deep border border-amber-400/50 font-label-md text-xs font-bold flex items-center gap-1 active:scale-95 transition-all"
+                title="Ativar lembretes push no celular"
+              >
+                <span className="material-symbols-outlined text-[16px] text-amber-600">notifications</span>
+                <span>Ativar Push</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => updatePresence('presente')}
+              disabled={isUpdating}
+              className="flex-1 sm:flex-initial min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-primary-container to-primary-bright text-on-primary font-headline-sm text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+            >
+              <span className="material-symbols-outlined text-[16px]">check_circle</span>
+              <span>Confirmar Agora</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* PAINEL DA DIRETORIA (EXCLUSIVO PARA ADMINISTRADORES) */}
       {isCurrentUserAdmin && (
-        <div className="w-full rounded-2xl bg-surface-container-lowest p-3.5 sm:p-4 shadow-sm border border-primary-container/25">
+        <div className="w-full rounded-2xl bg-surface-container-lowest p-3.5 sm:p-4 shadow-sm border border-primary-container/25 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-surface-container-high/50 flex-wrap">
             <div className="flex items-center gap-2 min-w-0">
               <span className="material-symbols-outlined text-primary-container text-[20px] shrink-0">admin_panel_settings</span>
@@ -284,7 +376,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
             {/* BOTÃO 1: ABRIR LISTA DA PRÓXIMA PELADA */}
             <button
               onClick={handleReleaseNextPelada}
@@ -317,6 +409,44 @@ const Dashboard: React.FC<DashboardProps> = ({
             >
               <span className="material-symbols-outlined text-[18px] shrink-0">payments</span>
               <span className="truncate">DEFINIR VALORES</span>
+            </button>
+          </div>
+
+          {/* BARRA DE LEMBRETE PUSH AUTOMÁTICO DE VÉSPERA PARA PENDENTES */}
+          <div className="p-2.5 sm:p-3 rounded-xl bg-surface-container-low border border-surface-container-high/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-700 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-[18px]">schedule_send</span>
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-navy-deep">
+                    Lembrete Push de Véspera (Automático)
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase">
+                    Ativo
+                  </span>
+                </div>
+                <p className="text-[11px] text-outline truncate">
+                  {pendingPlayersList.length} atleta(s) pendente(s) · Dispara automaticamente na véspera
+                  {lastAutoEveSentAt ? ` (Último envio: ${new Date(lastAutoEveSentAt).toLocaleDateString('pt-BR')})` : ''}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSendReminderToPending}
+              disabled={isSendingPendingPush || pendingPlayersList.length === 0}
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all shrink-0 disabled:opacity-50"
+              title="Disparar notificação push agora exclusivamente para os atletas com status Pendente"
+            >
+              <span className="material-symbols-outlined text-[16px]">notifications_active</span>
+              <span>
+                {isSendingPendingPush
+                  ? 'Enviando Push...'
+                  : `Lembrar Pendentes (${pendingPlayersList.length})`}
+              </span>
             </button>
           </div>
         </div>

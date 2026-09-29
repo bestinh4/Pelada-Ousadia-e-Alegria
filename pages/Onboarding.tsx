@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { db, doc, setDoc, auth, updateProfile } from '../services/firebase.ts';
 import { Page } from '../types.ts';
+import { MAIN_LOGO_URL } from '../constants.tsx';
 import { sendPushNotification, broadcastNotification } from '../services/notificationService.ts';
 
 interface OnboardingProps {
@@ -14,7 +15,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
   const [position, setPosition] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   
-  const logoUrl = "https://i.postimg.cc/QCGV109g/Gemini-Generated-Image-xrrv8axrrv8axrrv-removebg-preview.png";
+  const logoUrl = MAIN_LOGO_URL;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

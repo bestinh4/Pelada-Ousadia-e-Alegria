@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import Layout from './components/Layout.tsx';
 import Login from './pages/Login.tsx';
 import Onboarding from './pages/Onboarding.tsx';
@@ -13,17 +14,11 @@ import TeamBalancing from './pages/TeamBalancing.tsx';
 import NotificationToast, { Notification as InAppNotification } from './components/NotificationToast.tsx';
 import { MaintenanceScreen } from './components/MaintenanceScreen.tsx';
 import { Page, Player, Match } from './types.ts';
-import { MASTER_ADMIN_EMAIL } from './constants.tsx';
-import { auth, db, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, setDoc, getDocs, limit, where } from './services/firebase.ts';
-import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications } from './services/notificationService.ts';
+import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from './constants.tsx';
+import { auth, db, loginWithGoogle, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, setDoc, getDocs, limit, where } from './services/firebase.ts';
+import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications, sendPendingAthletesReminder } from './services/notificationService.ts';
+import { checkMatchEveInfo } from './utils/timeUtils.ts';
 import { playSound } from './utils/sound.ts';
-
-const DEFAULT_PREVIEW_USER = {
-  uid: 'master_admin_diogo',
-  email: MASTER_ADMIN_EMAIL,
-  displayName: 'Diogo (Admin)',
-  photoURL: 'https://ui-avatars.com/api/?name=Diogo&background=003a75&color=fff'
-};
 
 const VALID_PAGES = new Set<string>(Object.values(Page));
 
@@ -56,25 +51,22 @@ const sanitizePlayer = (id: string, raw: any): Player => {
 };
 
 const App: React.FC = () => {
-  const [user, setUser] = useState<any>(() => {
-    const saved = localStorage.getItem('oa_preview_user');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && parsed.uid) return parsed;
-      } catch {}
-    }
-    const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
-    if (!hasLoggedOut) {
-      return DEFAULT_PREVIEW_USER;
-    }
-    return null;
-  });
+  // Limpa qualquer sessão fake antiga salva no localStorage para impedir acesso admin sem login real
+  useEffect(() => {
+    localStorage.removeItem('oa_preview_user');
+  }, []);
 
-  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState<any>(() => auth.currentUser || null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
   const [currentPage, setCurrentPage] = useState<Page>(() => {
-    const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
-    if (hasLoggedOut) return Page.Login;
     const saved = localStorage.getItem('oa_current_page');
     return saved && VALID_PAGES.has(saved) && saved !== Page.Login && saved !== Page.Onboarding
       ? (saved as Page)
@@ -138,16 +130,16 @@ const App: React.FC = () => {
   }, [currentPage]);
 
   const handleDirectLogin = (mockUser: any) => {
-    localStorage.removeItem('oa_has_logged_out');
-    localStorage.setItem('oa_preview_user', JSON.stringify(mockUser));
     setUser(mockUser);
     setCurrentPage(Page.Dashboard);
   };
 
-  const handleLogout = () => {
-    localStorage.setItem('oa_has_logged_out', 'true');
+  const handleLogout = async () => {
     localStorage.removeItem('oa_preview_user');
     localStorage.removeItem('oa_current_page');
+    try {
+      await auth.signOut();
+    } catch {}
     setUser(null);
     setCurrentPage(Page.Login);
   };
@@ -220,22 +212,8 @@ const App: React.FC = () => {
           setCurrentPage(Page.Dashboard);
         }
       } else {
-        const previewUser = localStorage.getItem('oa_preview_user');
-        const hasLoggedOut = localStorage.getItem('oa_has_logged_out');
-        if (previewUser && !hasLoggedOut) {
-          try {
-            setUser(JSON.parse(previewUser));
-          } catch {
-            setUser(DEFAULT_PREVIEW_USER);
-          }
-          setCurrentPage(prev => (prev === Page.Login ? Page.Dashboard : prev));
-        } else if (!hasLoggedOut) {
-          setUser(DEFAULT_PREVIEW_USER);
-          setCurrentPage(prev => (prev === Page.Login ? Page.Dashboard : prev));
-        } else {
-          setUser(null);
-          setCurrentPage(Page.Login);
-        }
+        setUser(null);
+        setCurrentPage(Page.Login);
       }
       setLoading(false);
     });
@@ -343,6 +321,15 @@ const App: React.FC = () => {
           // Evitar notificar o próprio remetente
           if (data.senderId === user.uid) return;
 
+          // Se a notificação for exclusiva para atletas pendentes, verificar o status do atleta logado
+          if (data.targetStatus === 'pendente') {
+            const myPlayer = prevPlayersState.current[user.uid] || Object.values(prevPlayersState.current).find(
+              p => user.email && p.email && p.email.toLowerCase() === user.email.toLowerCase()
+            );
+            const myStatus = myPlayer?.status || 'pendente';
+            if (myStatus !== 'pendente') return;
+          }
+
           playSound('cheer');
           sendPushNotification(data.title, data.body);
           addInAppNotification(data.title, data.body, 'info');
@@ -357,21 +344,81 @@ const App: React.FC = () => {
     };
   }, [user]);
 
+  const currentPlayer = players.find(p => 
+    p.id === user?.uid || 
+    (user?.email && p.email && p.email.toLowerCase() === user.email.toLowerCase())
+  );
+
+  // SISTEMA AUTOMÁTICO DE LEMBRETES PUSH NA VÉSPERA DA PELADA (PARA ATLETAS COM STATUS PENDENTE)
+  useEffect(() => {
+    if (!user || players.length === 0) return;
+
+    const eveInfo = checkMatchEveInfo(currentMatch);
+    if (!eveInfo.isEve) return;
+
+    // 1. Lembrete Push Individual Automático no dispositivo do atleta que ainda está com status 'pendente'
+    const myStatus = currentPlayer?.status || 'pendente';
+    const personalStorageKey = `oa_eve_push_notified_${user.uid}_${eveInfo.eveDateKey}`;
+
+    if (myStatus === 'pendente' && !localStorage.getItem(personalStorageKey)) {
+      localStorage.setItem(personalStorageKey, 'true');
+      const timer = setTimeout(() => {
+        const title = '⏰ VÉSPERA DA PELADA • CONFIRME SUA PRESENÇA!';
+        const body = `Olá, ${currentPlayer?.name || user.displayName || 'Atleta'}! Seu status ainda está PENDENTE para a pelada de amanhã às ${eveInfo.matchTime}. Confirme agora sua vaga antes das 18h!`;
+        sendPushNotification(title, body);
+        addInAppNotification(title, body, 'info');
+      }, 2200);
+      return () => clearTimeout(timer);
+    }
+  }, [user, currentMatch, players, currentPlayer]);
+
+  // 2. Disparo Push Coletivo Automático de Véspera sincronizado via Firestore (1x na véspera para todos os pendentes)
+  useEffect(() => {
+    if (!user || players.length === 0) return;
+    const eveInfo = checkMatchEveInfo(currentMatch);
+    if (!eveInfo.isEve) return;
+
+    const pendingCount = players.filter(p => p.status === 'pendente').length;
+    if (pendingCount === 0) return;
+
+    let isCancelled = false;
+    const checkAndTriggerGlobalEveReminder = async () => {
+      try {
+        const reminderRef = doc(db, "settings", "reminders");
+        const snap = await getDoc(reminderRef);
+        const lastKey = snap.exists() ? snap.data()?.lastAutoEveReminderKey : null;
+
+        if (!isCancelled && lastKey !== eveInfo.eveDateKey) {
+          await setDoc(reminderRef, {
+            lastAutoEveReminderKey: eveInfo.eveDateKey,
+            lastAutoEveSentAt: new Date().toISOString(),
+            pendingCountAtSend: pendingCount
+          }, { merge: true });
+
+          await sendPendingAthletesReminder(currentMatch, 'system_auto_eve', true);
+        }
+      } catch {}
+    };
+
+    checkAndTriggerGlobalEveReminder();
+    return () => {
+      isCancelled = true;
+    };
+  }, [user, currentMatch, players]);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-neo-dots flex items-center justify-center">
-        <div className="flex flex-col items-center gap-6">
-          <div className="w-20 h-20 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-navy font-black text-[11px] tracking-[0.5em] uppercase animate-pulse">Sincronizando Arena...</p>
+      <div className="min-h-screen bg-navy-deep flex items-center justify-center">
+        <div className="flex flex-col items-center gap-5">
+          <div className="w-24 h-24 rounded-3xl bg-white p-2 shadow-2xl border-2 border-amber-400/60">
+            <img src={MAIN_LOGO_URL} alt="Ousadia & Alegria" className="w-full h-full object-contain rounded-2xl" referrerPolicy="no-referrer" />
+          </div>
+          <p className="text-white font-bold text-xs tracking-[0.3em] uppercase animate-pulse">Sincronizando Arena...</p>
         </div>
       </div>
     );
   }
 
-  const currentPlayer = players.find(p => 
-    p.id === user?.uid || 
-    (user?.email && p.email && p.email.toLowerCase() === user.email.toLowerCase())
-  );
   const isMaster = user?.email === MASTER_ADMIN_EMAIL;
   const effectiveRole = isMaster ? 'admin' : (currentPlayer?.role || 'player');
   const isAdmin = effectiveRole === 'admin' || isMaster;
@@ -407,11 +454,13 @@ const App: React.FC = () => {
               window.location.reload();
             }
           }}
-          onAdminLogin={() => {
+          onAdminLogin={async () => {
             if (adminPreviewMaintenance) {
               setAdminPreviewMaintenance(false);
             } else {
-              handleDirectLogin(DEFAULT_PREVIEW_USER);
+              try {
+                await loginWithGoogle();
+              } catch {}
             }
           }}
         />
@@ -428,7 +477,81 @@ const App: React.FC = () => {
     : rawActivePage;
 
   return (
-    <Layout currentPage={activePage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={enrichedUser}>
+    <>
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div
+            key="oa-splash-screen"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.04 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            onClick={() => setShowSplash(false)}
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 100000 }}
+            className="bg-gradient-to-b from-slate-950 via-navy-deep to-slate-950 flex flex-col items-center justify-center p-6 overflow-hidden select-none cursor-pointer"
+          >
+            {/* Iluminação de Estádio */}
+            <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-primary-container/25 blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-24 -left-24 w-80 h-80 rounded-full bg-amber-400/15 blur-3xl pointer-events-none" />
+
+            <motion.div
+              initial={{ scale: 0.78, opacity: 0, y: 16 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+              className="relative flex flex-col items-center z-10"
+            >
+              {/* Halo Dourado / Vermelho atrás do Novo Escudo */}
+              <motion.div
+                animate={{ scale: [1, 1.08, 1], opacity: [0.45, 0.75, 0.45] }}
+                transition={{ repeat: Infinity, duration: 2.2, ease: "easeInOut" }}
+                className="absolute -inset-4 rounded-full bg-gradient-to-tr from-primary-container/40 via-amber-400/35 to-blue-500/40 blur-2xl pointer-events-none"
+              />
+
+              {/* Moldura Oficial do Novo Escudo */}
+              <div className="w-36 h-36 sm:w-44 sm:h-44 rounded-[32px] bg-gradient-to-br from-amber-300 via-primary-container to-navy-deep p-[3px] shadow-[0_20px_60px_rgba(0,0,0,0.55)] relative z-10">
+                <div className="w-full h-full bg-white rounded-[29px] p-2.5 flex items-center justify-center overflow-hidden">
+                  <img
+                    src={MAIN_LOGO_URL}
+                    alt="Escudo Oficial Ousadia & Alegria"
+                    className="w-full h-full object-contain rounded-2xl"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              </div>
+
+              {/* Tipografia do Clube */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2, duration: 0.4 }}
+                className="text-center mt-6 space-y-1.5"
+              >
+                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-white/10 border border-amber-400/30 text-amber-300 text-[10px] font-bold uppercase tracking-[0.2em]">
+                  <span>⚽</span>
+                  <span>Arena Oficial • Temporada 2026</span>
+                </div>
+                <h1 className="font-headline-lg text-3xl sm:text-4xl text-white font-black tracking-wider uppercase drop-shadow">
+                  OUSADIA & ALEGRIA
+                </h1>
+                <p className="text-xs text-white/70 font-medium tracking-widest uppercase">
+                  Granja Cantinho do Céu
+                </p>
+              </motion.div>
+
+              {/* Barra de Progresso Rápida */}
+              <div className="w-48 h-1.5 bg-white/15 rounded-full overflow-hidden mt-7 border border-white/10">
+                <motion.div
+                  initial={{ width: "0%" }}
+                  animate={{ width: "100%" }}
+                  transition={{ duration: 1.35, ease: "easeInOut" }}
+                  className="h-full bg-gradient-to-r from-primary-container via-amber-400 to-emerald-400 rounded-full"
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <Layout currentPage={activePage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={enrichedUser}>
       {isMaintenance && isAdmin && (
         <div className="bg-amber-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between z-50 sticky top-0 shadow-md flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -488,6 +611,7 @@ const App: React.FC = () => {
         )}
       </div>
     </Layout>
+    </>
   );
 };
 

@@ -9,7 +9,7 @@ export default async function handler(
     return response.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { title, body, url } = request.body;
+  const { title, body, url, targetStatus } = request.body;
 
   if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
     return response.status(500).json({ error: 'FIREBASE_SERVICE_ACCOUNT not configured' });
@@ -26,12 +26,16 @@ export default async function handler(
     const db = admin.firestore();
     const messaging = admin.messaging();
 
-    // Buscar todos os tokens de push dos jogadores
+    // Buscar todos os tokens de push dos jogadores (filtrando por status pendente quando solicitado)
     const playersSnap = await db.collection("players").where("pushEnabled", "==", true).get();
     const tokens: string[] = [];
     
     playersSnap.forEach(pDoc => {
       const pData = pDoc.data();
+      if (targetStatus === 'pendente') {
+        const st = pData.status || 'pendente';
+        if (st !== 'pendente') return;
+      }
       if (pData.fcmToken) {
         tokens.push(pData.fcmToken);
       }

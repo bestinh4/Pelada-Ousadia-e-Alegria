@@ -55,6 +55,10 @@ async function startServer() {
         
         playersSnap.forEach(pDoc => {
           const pData = pDoc.data();
+          if (data.targetStatus === 'pendente') {
+            const st = pData.status || 'pendente';
+            if (st !== 'pendente') return;
+          }
           if (pData.fcmToken) {
             tokens.push(pData.fcmToken);
           }

@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { loginWithGoogle } from '../services/firebase.ts';
-import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
+import { MAIN_LOGO_URL } from '../constants.tsx';
 
 interface LoginProps {
   onDirectLogin?: (user: any) => void;
@@ -10,7 +10,7 @@ interface LoginProps {
 const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const logoUrl = "https://i.postimg.cc/QCGV109g/Gemini-Generated-Image-xrrv8axrrv8axrrv-removebg-preview.png";
+  const logoUrl = MAIN_LOGO_URL;
 
   const handleGoogleLogin = async () => {
     setIsLoggingIn(true);
@@ -19,31 +19,9 @@ const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
       await loginWithGoogle(); 
     } catch (err: any) { 
       console.warn("Falha no login com Google:", err);
-      setLoginError("Popups do Google podem ser bloqueados no iframe do preview. Utilize o Acesso Direto abaixo para navegar no app!");
+      setLoginError("Não foi possível concluir o login com o Google neste navegador. Tente novamente ou abra no navegador principal.");
     } finally { 
       setIsLoggingIn(false); 
-    }
-  };
-
-  const handleAdminAccess = () => {
-    if (onDirectLogin) {
-      onDirectLogin({
-        uid: "master_admin_diogo",
-        email: MASTER_ADMIN_EMAIL,
-        displayName: "Diogo (Admin)",
-        photoURL: "https://ui-avatars.com/api/?name=Diogo&background=003a75&color=fff"
-      });
-    }
-  };
-
-  const handleGuestAccess = () => {
-    if (onDirectLogin) {
-      onDirectLogin({
-        uid: "atleta_convidado_preview",
-        email: "convidado@ousadia.app",
-        displayName: "Atleta Convidado",
-        photoURL: "https://ui-avatars.com/api/?name=Atleta&background=003a75&color=fff"
-      });
     }
   };
 
@@ -55,11 +33,11 @@ const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
 
       <div className="w-full max-w-sm space-y-6 flex flex-col items-center animate-fade-in relative z-10">
         
-        {/* ESCUDO DO CLUBE */}
+        {/* ESCUDO DO CLUBE REFORMULADO */}
         <div className="relative group">
-           <div className="absolute inset-0 bg-primary-container/15 blur-2xl rounded-full scale-125"></div>
-           <div className="w-32 h-32 sm:w-36 sm:h-36 bg-surface-container-lowest rounded-2xl p-4 border border-surface-container-high/50 shadow-[0_12px_36px_rgba(0,58,117,0.08)] flex items-center justify-center relative z-10">
-             <img src={logoUrl} alt="Ousadia e Alegria" className="w-full h-full object-contain" />
+           <div className="absolute inset-0 bg-gradient-to-tr from-primary-container/25 via-amber-400/20 to-navy-deep/25 blur-2xl rounded-full scale-125"></div>
+           <div className="w-36 h-36 sm:w-40 sm:h-40 bg-white rounded-3xl p-2 border-2 border-amber-400/50 shadow-[0_16px_40px_rgba(0,58,117,0.16)] flex items-center justify-center relative z-10 overflow-hidden">
+             <img src={logoUrl} alt="Ousadia & Alegria" className="w-full h-full object-contain rounded-2xl" referrerPolicy="no-referrer" />
            </div>
         </div>
         
@@ -75,7 +53,7 @@ const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
             OUSADIA & ALEGRIA
           </h1>
           <p className="font-body-sm text-body-sm text-outline uppercase tracking-wider">
-            Estádio Digital & Gestão de Pelada
+            Arena Oficial • Granja Cantinho do Céu
           </p>
         </div>
 
@@ -87,56 +65,34 @@ const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
           </div>
         )}
 
-        {/* BOTÕES DE ENTRADA */}
-        <div className="w-full space-y-2.5">
-          {/* BOTÃO PRINCIPAL: ENTRAR COMO ADMIN (DIOGO) */}
-          <button 
-            onClick={handleAdminAccess}
-            className="w-full h-12 bg-gradient-to-r from-primary-container to-primary-bright text-on-primary rounded-xl font-headline-sm text-headline-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
-          >
-            <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
-            <span>ENTRAR COMO DIOGO (ADMIN)</span>
-          </button>
-
-          {/* BOTÃO SECUNDÁRIO: MODO CONVIDADO */}
-          <button 
-            onClick={handleGuestAccess}
-            className="w-full h-12 bg-surface-container-lowest hover:bg-surface-container border border-surface-container-high/60 text-navy-deep rounded-xl font-headline-sm text-headline-sm shadow-xs active:scale-95 transition-all flex items-center justify-center gap-2"
-          >
-            <span className="material-symbols-outlined text-[18px] text-secondary">visibility</span>
-            <span>EXPLORAR MODO CONVIDADO / ATLETA</span>
-          </button>
-
-          {/* DIVISOR */}
-          <div className="flex items-center gap-3 pt-1">
-            <div className="flex-1 h-px bg-surface-container-high"></div>
-            <span className="font-label-caps text-label-caps text-outline uppercase tracking-wider">OU VIA CONTA GOOGLE</span>
-            <div className="flex-1 h-px bg-surface-container-high"></div>
-          </div>
-
-          {/* BOTÃO GOOGLE */}
+        {/* BOTÃO OFICIAL DE LOGIN COM GOOGLE */}
+        <div className="w-full space-y-3">
           <button 
             onClick={handleGoogleLogin} 
             disabled={isLoggingIn}
-            className="w-full h-12 bg-navy-deep hover:bg-navy text-canvas-white rounded-xl font-headline-sm text-headline-sm shadow-xs active:scale-95 transition-all flex items-center justify-center gap-2"
+            className="w-full h-12 bg-gradient-to-r from-primary-container via-primary-bright to-navy-deep text-on-primary rounded-xl font-headline-sm text-sm font-bold shadow-md active:scale-95 transition-all flex items-center justify-center gap-2.5"
           >
             {isLoggingIn ? (
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
             ) : (
               <>
-                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
                   <path d="M12.24 10.285V13.4h6.887C18.2 15.632 15.645 18 12.24 18c-3.315 0-6-2.685-6-6s2.685-6 6-6c1.605 0 3.03.615 4.14 1.62l2.43-2.43C17.34 3.735 14.97 3 12.24 3 7.275 3 3.24 7.035 3.24 12s4.035 9 9 9c4.965 0 9-3.69 9-9 0-.66-.075-1.29-.21-1.715H12.24z"/>
                 </svg>
-                <span>LOGIN OFICIAL COM GOOGLE</span>
+                <span>ENTRAR COM CONTA GOOGLE</span>
               </>
             )}
           </button>
+
+          <p className="text-[11px] text-center text-outline leading-relaxed px-2">
+            Use seu e-mail Google para acessar sua conta de atleta ou da Diretoria automaticamente.
+          </p>
         </div>
 
         {/* FOOTER */}
         <div className="text-center pt-2">
            <p className="font-label-caps text-label-caps text-outline uppercase tracking-wider">
-             CROATIA ELITE SERIES • PWA ARENA
+             OUSADIA & ALEGRIA F.C. • APP OFICIAL
            </p>
         </div>
       </div>

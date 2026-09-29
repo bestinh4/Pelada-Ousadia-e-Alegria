@@ -65,27 +65,54 @@ export const setupForegroundNotifications = () => {
   }
 };
 
-export const broadcastNotification = async (title: string, body: string, senderId?: string) => {
+export const broadcastNotification = async (
+  title: string,
+  body: string,
+  senderId?: string,
+  targetStatus: 'all' | 'pendente' = 'all'
+) => {
   try {
-    // 1. Salvar no Firestore (para histórico e fallback)
+    // 1. Salvar no Firestore (para histórico e entrega em tempo real filtrada por targetStatus)
     await addDoc(collection(db, "notifications"), {
       title,
       body,
       createdAt: new Date().toISOString(),
-      type: 'broadcast',
+      type: targetStatus === 'pendente' ? 'pending_reminder' : 'broadcast',
+      targetStatus,
       senderId: senderId || null
     });
 
-    // 2. Chamar a API para disparo imediato (compatível com Vercel)
+    // 2. Chamar a API para disparo imediato via FCM (compatível com Express e Vercel)
     await fetch('/api/send-notification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, body, url: '/' })
-    });
+      body: JSON.stringify({ title, body, url: '/', targetStatus })
+    }).catch(() => {});
 
   } catch (error) {
     console.error("❌ Erro ao transmitir notificação:", error);
   }
+};
+
+/**
+ * Dispara lembrete push exclusivo para atletas com status 'pendente'
+ * incentivando a confirmação na lista antes do fechamento.
+ */
+export const sendPendingAthletesReminder = async (
+  match?: { date?: string; time?: string; location?: string } | null,
+  senderId?: string,
+  isAutomaticEve: boolean = false
+) => {
+  const matchTime = match?.time || '07:30';
+  const location = match?.location || 'Granja Cantinho do Céu';
+  const title = isAutomaticEve
+    ? '⏰ VÉSPERA DA PELADA • CONFIRME SUA PRESENÇA!'
+    : '⚽ VOCÊ AINDA ESTÁ PENDENTE NA LISTA!';
+  const body = isAutomaticEve
+    ? `Amanhã tem pelada às ${matchTime} (${location}) e seu nome ainda está PENDENTE! Toque para confirmar presença até as 18h.`
+    : `Seu status ainda consta como PENDENTE para a pelada (${location} às ${matchTime}). Acesse o app e confirme sua vaga!`;
+
+  await broadcastNotification(title, body, senderId, 'pendente');
 };
 
 export const sendPushNotification = async (title: string, body: string) => {
