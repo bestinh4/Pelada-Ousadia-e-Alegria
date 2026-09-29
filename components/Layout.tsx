@@ -57,11 +57,11 @@ const Layout: React.FC<LayoutProps> = ({
             className="flex items-center gap-2.5 cursor-pointer select-none active:scale-[0.98] transition-transform duration-150 group min-w-0"
           >
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep p-[2px] flex items-center justify-center shadow-sm shrink-0">
-              <div className="w-full h-full bg-surface/80 backdrop-blur-sm rounded-[10px] flex items-center justify-center p-0.5 overflow-hidden">
+              <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center p-1 overflow-hidden">
                 <img 
                   src={MAIN_LOGO_URL} 
                   alt="Ousadia & Alegria" 
-                  className="w-full h-full object-contain drop-shadow-xs"
+                  className="w-full h-full max-w-full max-h-full object-contain m-auto block"
                   referrerPolicy="no-referrer"
                 />
               </div>

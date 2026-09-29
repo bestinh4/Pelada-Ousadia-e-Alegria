@@ -410,8 +410,10 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-navy-deep flex items-center justify-center">
         <div className="flex flex-col items-center gap-5">
-          <div className="w-28 h-28 rounded-3xl bg-white/5 backdrop-blur-md p-2.5 shadow-2xl border-2 border-amber-400/60 flex items-center justify-center">
-            <img src={MAIN_LOGO_URL} alt="Ousadia & Alegria" className="w-full h-full object-contain drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)]" referrerPolicy="no-referrer" />
+          <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-amber-300 via-primary-container to-navy-deep p-[3px] shadow-2xl shrink-0">
+            <div className="w-full h-full bg-white rounded-[21px] p-2 flex items-center justify-center overflow-hidden">
+              <img src={MAIN_LOGO_URL} alt="Ousadia & Alegria" className="w-full h-full max-w-full max-h-full object-contain m-auto block" referrerPolicy="no-referrer" />
+            </div>
           </div>
           <p className="text-white font-bold text-xs tracking-[0.3em] uppercase animate-pulse">Sincronizando Arena...</p>
         </div>
@@ -506,13 +508,13 @@ const App: React.FC = () => {
                 className="absolute -inset-4 rounded-full bg-gradient-to-tr from-primary-container/40 via-amber-400/35 to-blue-500/40 blur-2xl pointer-events-none"
               />
 
-              {/* Moldura Oficial do Novo Escudo (Sem Fundo Branco) */}
-              <div className="w-36 h-36 sm:w-44 sm:h-44 rounded-[32px] bg-gradient-to-br from-amber-300 via-primary-container to-navy-deep p-[3px] shadow-[0_20px_60px_rgba(0,0,0,0.55)] relative z-10">
-                <div className="w-full h-full bg-slate-950/75 backdrop-blur-md rounded-[29px] p-2.5 flex items-center justify-center overflow-hidden">
+              {/* Moldura Oficial do Novo Escudo (Sem Fundo Preto) */}
+              <div className="w-36 h-36 sm:w-44 sm:h-44 rounded-[32px] bg-gradient-to-br from-amber-300 via-primary-container to-navy-deep p-[3px] shadow-[0_20px_60px_rgba(0,0,0,0.55)] relative z-10 shrink-0">
+                <div className="w-full h-full bg-white rounded-[29px] p-2.5 flex items-center justify-center overflow-hidden">
                   <img
                     src={MAIN_LOGO_URL}
                     alt="Escudo Oficial Ousadia & Alegria"
-                    className="w-full h-full object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.6)]"
+                    className="w-full h-full max-w-full max-h-full object-contain m-auto block"
                     referrerPolicy="no-referrer"
                   />
                 </div>

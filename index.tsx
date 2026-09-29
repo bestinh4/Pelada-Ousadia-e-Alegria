@@ -3,19 +3,84 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 
-// Registro do Service Worker para Notificações e limpeza de caches antigos
+const ICON_ASSET_VERSION = 'v20';
+
+async function forceRefreshAppIconsAndManifest() {
+  try {
+    // Atualiza dinamicamente as tags <link> no DOM para forçar o navegador/WebAPK a detectar o novo ícone e manifest
+    const head = document.head;
+    if (head) {
+      const manifestLink = head.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+      if (manifestLink) manifestLink.href = `/manifest.json?v=20`;
+
+      const appleIcon = head.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement | null;
+      if (appleIcon) appleIcon.href = `/apple-touch-icon.png?v=20`;
+
+      const iconLinks = head.querySelectorAll('link[rel="icon"]');
+      iconLinks.forEach((link) => {
+        const el = link as HTMLLinkElement;
+        if (el.sizes?.value === '192x192') {
+          el.href = `/pwa-192x192.png?v=20`;
+        } else {
+          el.href = `/favicon.png?v=20`;
+        }
+      });
+    }
+
+    const lastSyncedVersion = localStorage.getItem('oa_icon_asset_version');
+    if (lastSyncedVersion !== ICON_ASSET_VERSION) {
+      const urlsToRefresh = [
+        '/manifest.json',
+        '/manifest.json?v=20',
+        '/pwa-192x192.png',
+        '/pwa-192x192.png?v=20',
+        '/pwa-512x512.png',
+        '/pwa-512x512.png?v=20',
+        '/pwa-maskable-192x192.png?v=20',
+        '/pwa-maskable-512x512.png?v=20',
+        '/apple-touch-icon.png',
+        '/apple-touch-icon.png?v=20',
+        '/favicon.png',
+        '/favicon.png?v=20',
+        '/images/ousadia_alegria_crest.png',
+        '/images/ousadia_alegria_crest.png?v=20',
+      ];
+      await Promise.allSettled(
+        urlsToRefresh.map((u) => fetch(u, { cache: 'reload' }))
+      );
+      localStorage.setItem('oa_icon_asset_version', ICON_ASSET_VERSION);
+    }
+  } catch {}
+}
+
+// Registro do Service Worker para Notificações e atualização automática de ícones/caches sem reinstalar
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      await forceRefreshAppIconsAndManifest();
+      const registration = await navigator.serviceWorker.register('/sw.js', {
+        scope: '/',
+        updateViaCache: 'none',
+      });
       registration.update().catch(() => {});
       if ('caches' in window) {
         const keys = await caches.keys();
         await Promise.all(keys.map(k => caches.delete(k)));
       }
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          registration.update().catch(() => {});
+          forceRefreshAppIconsAndManifest();
+        }
+      });
     } catch (err) {
       console.error('Falha ao registrar SW:', err);
     }
+  });
+} else {
+  window.addEventListener('load', () => {
+    forceRefreshAppIconsAndManifest();
   });
 }
 

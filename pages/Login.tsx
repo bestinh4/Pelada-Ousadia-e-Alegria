@@ -33,16 +33,18 @@ const Login: React.FC<LoginProps> = ({ onDirectLogin }) => {
 
       <div className="w-full max-w-sm space-y-6 flex flex-col items-center animate-fade-in relative z-10">
         
-        {/* ESCUDO DO CLUBE REFORMULADO COM MOLDURA (SEM FUNDO BRANCO) */}
+        {/* ESCUDO DO CLUBE COM MOLDURA AJUSTADA PARA MOBILE */}
         <div className="relative group">
            <div className="absolute inset-0 bg-gradient-to-tr from-primary-container/25 via-amber-400/20 to-navy-deep/25 blur-2xl rounded-full scale-125 pointer-events-none"></div>
-           <div className="w-36 h-36 sm:w-40 sm:h-40 bg-surface-container-lowest/30 backdrop-blur-md rounded-3xl p-2.5 border-2 border-amber-400/60 shadow-[0_16px_40px_rgba(0,58,117,0.16)] flex items-center justify-center relative z-10 overflow-hidden">
-             <img 
-               src={logoUrl} 
-               alt="Ousadia & Alegria" 
-               className="w-full h-full object-contain drop-shadow-[0_8px_16px_rgba(0,58,117,0.22)] transition-transform duration-300 group-hover:scale-105" 
-               referrerPolicy="no-referrer" 
-             />
+           <div className="w-36 h-36 sm:w-40 sm:h-40 rounded-3xl bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep p-[3px] shadow-[0_16px_40px_rgba(0,58,117,0.16)] relative z-10 shrink-0">
+             <div className="w-full h-full bg-white rounded-[21px] p-2.5 flex items-center justify-center overflow-hidden">
+               <img 
+                 src={logoUrl} 
+                 alt="Ousadia & Alegria" 
+                 className="w-full h-full max-w-full max-h-full object-contain m-auto block transition-transform duration-300 group-hover:scale-105" 
+                 referrerPolicy="no-referrer" 
+               />
+             </div>
            </div>
         </div>
         

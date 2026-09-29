@@ -66,8 +66,10 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
 
       <div className="w-full max-w-[400px] bg-surface-container-lowest rounded-2xl shadow-[0_12px_36px_rgba(0,58,117,0.08)] border border-surface-container-high/40 p-6 sm:p-8 flex flex-col z-10 animate-fade-in">
         <div className="flex flex-col items-center mb-6">
-          <div className="w-24 h-24 rounded-2xl bg-surface-container/40 backdrop-blur-sm p-2 mb-4 shadow-xs border-2 border-amber-400/50 flex items-center justify-center">
-            <img src={logoUrl} alt="Logo Ousadia & Alegria" className="w-full h-full object-contain drop-shadow-sm" referrerPolicy="no-referrer" />
+          <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep p-[2px] mb-4 shadow-xs shrink-0">
+            <div className="w-full h-full bg-white rounded-[14px] p-2 flex items-center justify-center overflow-hidden">
+              <img src={logoUrl} alt="Logo Ousadia & Alegria" className="w-full h-full max-w-full max-h-full object-contain m-auto block" referrerPolicy="no-referrer" />
+            </div>
           </div>
           <div className="flex items-center gap-1.5 mb-1">
             <span className="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>

@@ -15,7 +15,7 @@ const messaging = firebase.messaging();
 
 console.log("🛠️ Service Worker carregado!");
 
-const CACHE_NAME = 'oa-elite-pro-v19';
+const CACHE_NAME = 'oa-elite-pro-v20';
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -27,9 +27,26 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.map((cacheName) => caches.delete(cacheName))
       );
-    })
+    }).then(() => self.clients.claim())
   );
-  self.clients.claim();
+});
+
+// Garantir que ícones, escudo e manifest nunca fiquem presos em cache antigo
+self.addEventListener('fetch', (event) => {
+  try {
+    const url = new URL(event.request.url);
+    if (
+      url.pathname.includes('manifest.json') ||
+      url.pathname.includes('pwa-') ||
+      url.pathname.includes('apple-touch-icon') ||
+      url.pathname.includes('favicon') ||
+      url.pathname.includes('ousadia_alegria_crest')
+    ) {
+      event.respondWith(
+        fetch(event.request, { cache: 'no-store' }).catch(() => fetch(event.request))
+      );
+    }
+  } catch (e) {}
 });
 
 self.addEventListener('message', (event) => {
@@ -89,8 +106,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: '/pwa-192x192.png',
-    badge: '/pwa-192x192.png',
+    icon: '/pwa-192x192.png?v=20',
+    badge: '/pwa-192x192.png?v=20',
     vibrate: [200, 100, 200, 100, 200],
     tag: 'oa-notification',
     renotify: true,

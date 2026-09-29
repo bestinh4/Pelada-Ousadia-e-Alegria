@@ -17,12 +17,16 @@ export const MaintenanceScreen: React.FC<MaintenanceScreenProps> = ({ onCheckAga
         {/* Header com Escudo e Tag de Manutenção */}
         <div className="flex items-center justify-between w-full border-b border-surface-container-high/40 pb-3">
           <div className="flex items-center gap-2.5">
-            <img 
-              src={MAIN_LOGO_URL} 
-              alt="Ousadia & Alegria" 
-              className="w-10 h-10 object-contain drop-shadow-sm"
-              referrerPolicy="no-referrer"
-            />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep p-[2px] flex items-center justify-center shadow-xs shrink-0">
+              <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center p-1 overflow-hidden">
+                <img 
+                  src={MAIN_LOGO_URL} 
+                  alt="Ousadia & Alegria" 
+                  className="w-full h-full max-w-full max-h-full object-contain m-auto block"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </div>
             <div className="text-left">
               <h2 className="font-headline-sm text-sm text-navy-deep font-bold leading-tight">
                 OUSADIA & ALEGRIA F.C.
