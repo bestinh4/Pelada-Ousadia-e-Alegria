@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Player, Page } from '../types.ts';
 import { MatchSession, Team } from '../domain/types.ts';
 import { db, doc, setDoc, onSnapshot, deleteDoc, updateDoc, collection, addDoc } from '../services/firebase.ts';
@@ -1544,6 +1545,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
                   {isAdm && (
                     <button
+                      type="button"
                       onClick={() => setIsRemanageModalOpen(true)}
                       className="min-h-[40px] py-2 px-3 bg-surface-container hover:bg-surface-container-high text-navy-deep rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
                       title="Trocar ou transferir atletas entre equipes"
@@ -1552,10 +1554,23 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                       <span>Remanejar</span>
                     </button>
                   )}
+
+                  {isAdm && (
+                    <button
+                      type="button"
+                      onClick={handleOpenFinishModal}
+                      className="min-h-[40px] py-2 px-3 bg-surface-container hover:bg-surface-container-high text-navy-deep rounded-xl font-headline-sm text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+                      title="Ajuste manual de presença, faltas e multas"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">edit_note</span>
+                      <span>Ajuste Manual</span>
+                    </button>
+                  )}
                 </div>
 
                 {isAdm && (
                   <button 
+                    type="button"
                     onClick={handleResetDraw}
                     className="min-h-[40px] py-2 px-3 text-error hover:bg-error/10 rounded-xl font-label-md text-xs font-semibold flex items-center gap-1 active:scale-95 transition-all"
                     title="Apagar escalação e fazer novo sorteio"
@@ -2278,61 +2293,85 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         </AnimatePresence>
       </main>
 
-      {/* MODAL 1: REMANEJAR / TROCAR ATLETAS ENTRE TIMES (ADMIN) */}
-      {isRemanageModalOpen && session && (
-        <div className="fixed inset-0 z-[120] bg-navy-deep/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest max-w-lg w-full rounded-2xl p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 animate-pop-in max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary-container text-[24px]">sync_alt</span>
-                <h3 className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                  Remanejar Atletas Entre Times
-                </h3>
+      {/* MODAL 1: REMANEJAR / TROCAR ATLETAS ENTRE TIMES (PORTALIZADO NO BODY PARA RESPONSIVIDADE TOTAL) */}
+      {isRemanageModalOpen && session && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsRemanageModalOpen(false);
+              setSelectedPlayerToMove(null);
+              setTargetTeamId('');
+              setSwapWithPlayerId('');
+            }
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep max-w-lg w-full max-h-[88dvh] sm:max-h-[90dvh] rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-surface-container-high/60 shadow-2xl flex flex-col gap-3.5 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-3 shrink-0 gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-primary-container/10 text-primary-container flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-[20px] sm:text-[22px]">sync_alt</span>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-headline-sm text-sm sm:text-lg text-navy-deep font-bold truncate">
+                    Remanejar Atletas entre Equipes
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-outline truncate">
+                    Transfira um atleta de time ou faça troca 1 por 1
+                  </p>
+                </div>
               </div>
               <button 
+                type="button"
                 onClick={() => {
                   setIsRemanageModalOpen(false);
                   setSelectedPlayerToMove(null);
                   setTargetTeamId('');
                   setSwapWithPlayerId('');
                 }}
-                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-outline hover:text-navy-deep shrink-0 active:scale-95"
               >
-                <span className="material-symbols-outlined text-[18px]">close</span>
+                <span className="material-symbols-outlined text-[18px] sm:text-[20px]">close</span>
               </button>
             </div>
 
-            <p className="font-body-sm text-xs text-outline">
-              Transfira um jogador de um time para outro ou faça a troca direta entre dois atletas de equipes diferentes.
-            </p>
-
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3.5 overflow-y-auto min-h-0 flex-1 pr-1">
               {/* Passo 1: Escolher o Atleta de Origem */}
-              <div>
-                <label className="font-label-md text-xs text-outline block mb-1 font-bold">
-                  1. Selecione o Atleta que vai mudar de time:
+              <div className="bg-surface-container-low/60 p-3 rounded-xl border border-surface-container-high/50">
+                <label className="font-label-md text-xs sm:text-sm text-navy-deep block mb-1.5 font-bold">
+                  1. Atleta que vai mudar de time:
                 </label>
                 <select 
                   value={selectedPlayerToMove ? `${selectedPlayerToMove.teamId}:::${selectedPlayerToMove.playerId}` : ''}
                   onChange={(e) => {
                     if (!e.target.value) {
                       setSelectedPlayerToMove(null);
+                      setTargetTeamId('');
+                      setSwapWithPlayerId('');
                       return;
                     }
                     const [tId, pId] = e.target.value.split(':::');
                     setSelectedPlayerToMove({ teamId: tId, playerId: pId });
+                    const firstOtherTeam = session.teams.find(t => t.id !== tId)?.id || '';
+                    if (!targetTeamId || targetTeamId === tId) {
+                      setTargetTeamId(firstOtherTeam);
+                    }
                     setSwapWithPlayerId('');
                   }}
-                  className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high font-body-md text-navy-deep font-semibold outline-none"
+                  className="w-full h-11 px-3 rounded-xl bg-white border border-surface-container-high font-body-md text-xs sm:text-sm text-navy-deep font-semibold outline-none focus:border-primary-container"
                 >
-                  <option value="">Selecione um atleta...</option>
+                  <option value="">Toque para escolher o atleta...</option>
                   {session.teams.map((t) => (
                     <optgroup key={t.id} label={t.name}>
                       {sortTeamPlayerIds(t.playerIds).map(pid => {
                         const p = players.find(x => x.id === pid);
                         return (
                           <option key={pid} value={`${t.id}:::${pid}`}>
-                            {p?.name} ({p?.position}) - {t.name}
+                            {p?.name} ({p?.position}) — {t.name}
                           </option>
                         );
                       })}
@@ -2342,104 +2381,139 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
               </div>
 
               {/* Passo 2: Escolher o Time de Destino */}
-              {selectedPlayerToMove && (
-                <div>
-                  <label className="font-label-md text-xs text-outline block mb-1 font-bold">
-                    2. Selecione o Time de Destino:
-                  </label>
-                  <select 
-                    value={targetTeamId}
-                    onChange={(e) => {
-                      setTargetTeamId(e.target.value);
-                      setSwapWithPlayerId('');
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high font-body-md text-navy-deep font-semibold outline-none"
-                  >
-                    <option value="">Selecione o time de destino...</option>
-                    {session.teams
-                      .filter(t => t.id !== selectedPlayerToMove.teamId)
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name} ({t.playerIds.length} atletas)
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Passo 3 (Opcional): Trocar com um atleta específico do time de destino */}
-              {selectedPlayerToMove && targetTeamId && (
-                <div>
-                  <label className="font-label-md text-xs text-outline block mb-1 font-bold">
-                    3. Deseja trocar diretamente com algum atleta? (Opcional)
-                  </label>
-                  <select 
-                    value={swapWithPlayerId}
-                    onChange={(e) => setSwapWithPlayerId(e.target.value)}
-                    className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high font-body-md text-navy-deep font-semibold outline-none"
-                  >
-                    <option value="">Nenhum (Apenas transferir atleta)</option>
-                    {sortTeamPlayerIds(
-                      session.teams.find(t => t.id === targetTeamId)?.playerIds || []
-                    ).map(pid => {
-                      const p = players.find(x => x.id === pid);
+              <div className={`p-3 rounded-xl border transition-all ${
+                selectedPlayerToMove 
+                  ? 'bg-surface-container-low/60 border-surface-container-high/50' 
+                  : 'bg-surface-container-low/30 border-surface-container-high/30 opacity-60'
+              }`}>
+                <label className="font-label-md text-xs sm:text-sm text-navy-deep block mb-1.5 font-bold">
+                  2. Time de destino:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2">
+                  {session.teams
+                    .filter(t => !selectedPlayerToMove || t.id !== selectedPlayerToMove.teamId)
+                    .map((t) => {
+                      const isSelectedDest = targetTeamId === t.id;
                       return (
-                        <option key={pid} value={pid}>
-                          Trocar por: {p?.name} ({p?.position})
-                        </option>
+                        <button
+                          key={t.id}
+                          type="button"
+                          disabled={!selectedPlayerToMove}
+                          onClick={() => {
+                            setTargetTeamId(t.id);
+                            setSwapWithPlayerId('');
+                          }}
+                          className={`py-2 px-2.5 rounded-xl text-xs font-bold border transition-all flex items-center justify-between gap-1 ${
+                            isSelectedDest
+                              ? 'bg-navy-deep text-white border-navy-deep shadow-xs'
+                              : 'bg-white text-navy-deep border-surface-container-high hover:bg-surface-container'
+                          } disabled:cursor-not-allowed`}
+                        >
+                          <span className="truncate">{t.name}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                            isSelectedDest ? 'bg-white/20 text-white' : 'bg-surface-container text-outline'
+                          }`}>
+                            {t.playerIds.length}
+                          </span>
+                        </button>
                       );
                     })}
-                  </select>
                 </div>
-              )}
+              </div>
+
+              {/* Passo 3 (Opcional): Trocar com um atleta específico do time de destino */}
+              <div className={`p-3 rounded-xl border transition-all ${
+                selectedPlayerToMove && targetTeamId
+                  ? 'bg-surface-container-low/60 border-surface-container-high/50'
+                  : 'bg-surface-container-low/30 border-surface-container-high/30 opacity-60'
+              }`}>
+                <label className="font-label-md text-xs sm:text-sm text-navy-deep block mb-1.5 font-bold">
+                  3. Trocar por atleta do {session.teams.find(t => t.id === targetTeamId)?.name || 'time destino'}? (Opcional)
+                </label>
+                <select 
+                  disabled={!selectedPlayerToMove || !targetTeamId}
+                  value={swapWithPlayerId}
+                  onChange={(e) => setSwapWithPlayerId(e.target.value)}
+                  className="w-full h-11 px-3 rounded-xl bg-white border border-surface-container-high font-body-md text-xs sm:text-sm text-navy-deep font-semibold outline-none focus:border-primary-container disabled:cursor-not-allowed"
+                >
+                  <option value="">Não trocar (Apenas transferir para o time)</option>
+                  {targetTeamId && sortTeamPlayerIds(
+                    session.teams.find(t => t.id === targetTeamId)?.playerIds || []
+                  ).map(pid => {
+                    const p = players.find(x => x.id === pid);
+                    return (
+                      <option key={pid} value={pid}>
+                        Trocar 1x1 com: {p?.name} ({p?.position})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-surface-container-high/40">
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-surface-container-high/50 shrink-0">
               <button 
+                type="button"
                 onClick={() => setIsRemanageModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-surface-container text-on-surface font-label-md"
+                className="px-4 py-2.5 rounded-xl bg-surface-container text-navy-deep font-label-md text-xs sm:text-sm font-bold active:scale-95"
               >
                 Cancelar
               </button>
               <button 
+                type="button"
                 onClick={handleExecuteRemanage}
                 disabled={!selectedPlayerToMove || !targetTeamId || isMovingAthlete}
-                className="px-5 py-2 rounded-xl bg-primary-container text-on-primary font-headline-sm flex items-center gap-1 shadow-md active:scale-95 disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-primary-bright text-on-primary font-headline-sm text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-md active:scale-95 disabled:opacity-50"
               >
-                {isMovingAthlete ? 'Remanejando...' : 'Confirmar Remanejamento'}
+                <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                <span>{isMovingAthlete ? 'Salvando...' : 'Confirmar Remanejamento'}</span>
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* MODAL 2: ADICIONAR ATLETA AO TIME (ADMIN) */}
-      {isAddPlayerModalOpen && targetTeamForAdd && (
-        <div className="fixed inset-0 z-[120] bg-navy-deep/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest max-w-md w-full rounded-2xl p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 animate-pop-in max-h-[85vh] overflow-hidden">
-            <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary-container text-[24px]">person_add</span>
-                <h3 className="font-headline-sm text-headline-sm text-navy-deep font-bold">
-                  Adicionar Atleta ao {session?.teams.find(t => t.id === targetTeamForAdd)?.name}
+      {/* MODAL 2: ADICIONAR ATLETA AO TIME (PORTALIZADO NO BODY) */}
+      {isAddPlayerModalOpen && targetTeamForAdd && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsAddPlayerModalOpen(false);
+              setTargetTeamForAdd(null);
+            }
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep max-w-md w-full max-h-[85dvh] rounded-2xl sm:rounded-3xl p-4 sm:p-6 border border-surface-container-high/60 shadow-2xl flex flex-col gap-3 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-3 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-primary-container text-[22px] shrink-0">person_add</span>
+                <h3 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold truncate">
+                  Adicionar ao {session?.teams.find(t => t.id === targetTeamForAdd)?.name}
                 </h3>
               </div>
               <button 
+                type="button"
                 onClick={() => {
                   setIsAddPlayerModalOpen(false);
                   setTargetTeamForAdd(null);
                 }}
-                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep"
+                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep shrink-0"
               >
                 <span className="material-symbols-outlined text-[18px]">close</span>
               </button>
             </div>
 
-            <p className="font-body-sm text-xs text-outline">
-              Selecione um dos atletas abaixo para incluí-lo nesta equipe:
+            <p className="font-body-sm text-xs text-outline shrink-0">
+              Toque em um atleta disponível abaixo para escalá-lo nesta equipe:
             </p>
 
-            <div className="flex flex-col gap-2 overflow-y-auto max-h-72 pr-1">
+            <div className="flex flex-col gap-2 overflow-y-auto min-h-0 flex-1 pr-1">
               {availablePlayersToAdd.length === 0 ? (
                 <div className="p-4 text-center text-xs text-outline font-body-sm">
                   Todos os atletas cadastrados já estão escalados em algum time.
@@ -2451,20 +2525,20 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                     onClick={() => handleAddPlayerToTeam(p.id)}
                     className="flex items-center justify-between p-2.5 rounded-xl bg-surface-container-low hover:bg-surface-container border border-surface-container-high/40 cursor-pointer active:scale-98 transition-all"
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <img 
                         src={p.photoUrl} 
-                        className="w-8 h-8 rounded-full object-cover" 
+                        className="w-8 h-8 rounded-full object-cover shrink-0" 
                         referrerPolicy="no-referrer" 
                         alt="" 
                       />
-                      <div>
-                        <p className="font-headline-sm text-xs text-navy-deep font-bold">{p.name}</p>
+                      <div className="min-w-0">
+                        <p className="font-headline-sm text-xs sm:text-sm text-navy-deep font-bold truncate">{p.name}</p>
                         <span className="text-[10px] text-outline uppercase font-semibold">{p.position}</span>
                       </div>
                     </div>
 
-                    <button className="px-2.5 py-1 bg-primary-container text-on-primary rounded-lg text-xs font-bold">
+                    <button type="button" className="px-2.5 py-1 bg-primary-container text-on-primary rounded-lg text-xs font-bold shrink-0">
                       Adicionar
                     </button>
                   </div>
@@ -2472,43 +2546,55 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
               )}
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-surface-container-high/40">
+            <div className="flex justify-end pt-2 border-t border-surface-container-high/40 shrink-0">
               <button 
+                type="button"
                 onClick={() => {
                   setIsAddPlayerModalOpen(false);
                   setTargetTeamForAdd(null);
                 }}
-                className="px-4 py-2 rounded-xl bg-surface-container text-on-surface font-label-md"
+                className="px-4 py-2 rounded-xl bg-surface-container text-navy-deep font-label-md text-xs font-bold"
               >
                 Fechar
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* MODAL 3: ENCERRAMENTO OFICIAL DA PELADA • CONFERÊNCIA DE QUEM PARTICIPOU, QUEM FALTOU E QUEM SERÁ MULTADO */}
-      {isFinishModalOpen && session && (
-        <div className="fixed inset-0 z-[130] bg-navy-deep/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-surface-container-lowest max-w-2xl w-full rounded-2xl p-4 sm:p-6 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 animate-pop-in max-h-[92vh] overflow-hidden">
+      {/* MODAL 3: AJUSTE MANUAL / ENCERRAMENTO OFICIAL DA PELADA (PORTALIZADO NO BODY) */}
+      {isFinishModalOpen && session && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsFinishModalOpen(false);
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep max-w-2xl w-full max-h-[90dvh] rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 border border-surface-container-high/60 shadow-2xl flex flex-col gap-2.5 sm:gap-3.5 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header do Modal */}
-            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-3 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-red-600/15 text-red-700 flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-[24px]">flag</span>
+            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-2.5 shrink-0 gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-red-600/15 text-red-700 flex items-center justify-center shrink-0">
+                  <span className="material-symbols-outlined text-[20px] sm:text-[22px]">edit_note</span>
                 </div>
-                <div>
-                  <h3 className="font-headline-sm text-base sm:text-lg text-navy-deep font-bold leading-tight">
-                    Encerrar Pelada • Apuração de Faltas e Multas
+                <div className="min-w-0">
+                  <h3 className="font-headline-sm text-sm sm:text-lg text-navy-deep font-bold leading-tight truncate">
+                    Ajuste Manual • Presença e Multas
                   </h3>
-                  <p className="font-body-sm text-xs text-outline">
-                    Confirme quem participou na quadra, quem colocou o nome e não compareceu, e quem será multado
+                  <p className="font-body-sm text-[11px] sm:text-xs text-outline truncate">
+                    Defina quem participou na quadra e quem receberá multa
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setIsFinishModalOpen(false)}
-                className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep shrink-0"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-outline hover:text-navy-deep shrink-0 active:scale-95"
               >
                 <span className="material-symbols-outlined text-[18px]">close</span>
               </button>
@@ -2525,47 +2611,49 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                 <>
                   {/* Resumo Ao Vivo da Conferência */}
                   <div className="grid grid-cols-3 gap-2 shrink-0">
-                    <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
-                      <span className="font-scoreboard-num text-2xl text-emerald-700 leading-none block">
+                    <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
+                      <span className="font-scoreboard-num text-lg sm:text-2xl text-emerald-700 leading-none block">
                         {presentCount}
                       </span>
-                      <span className="text-[10px] font-bold uppercase text-emerald-900">
+                      <span className="text-[9px] sm:text-[10px] font-bold uppercase text-emerald-900">
                         ✅ Participaram
                       </span>
                     </div>
 
-                    <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-center">
-                      <span className="font-scoreboard-num text-2xl text-amber-700 leading-none block">
+                    <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-center">
+                      <span className="font-scoreboard-num text-lg sm:text-2xl text-amber-700 leading-none block">
                         {absentCount}
                       </span>
-                      <span className="text-[10px] font-bold uppercase text-amber-900">
-                        ❌ Não Compareceram
+                      <span className="text-[9px] sm:text-[10px] font-bold uppercase text-amber-900">
+                        ❌ Faltaram
                       </span>
                     </div>
 
-                    <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-center">
-                      <span className="font-scoreboard-num text-2xl text-red-700 leading-none block">
+                    <div className="p-2 rounded-xl bg-red-50 border border-red-200 text-center">
+                      <span className="font-scoreboard-num text-lg sm:text-2xl text-red-700 leading-none block">
                         {finedCount}
                       </span>
-                      <span className="text-[10px] font-bold uppercase text-red-900">
-                        🚨 Serão Multados
+                      <span className="text-[9px] sm:text-[10px] font-bold uppercase text-red-900">
+                        🚨 Multados
                       </span>
                     </div>
                   </div>
 
                   {/* Configuração do Valor da Multa + Atalhos Rápidos */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-surface-container-low p-3 rounded-xl border border-surface-container-high/50 shrink-0">
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-red-600 text-[20px]">payments</span>
-                      <label className="text-xs font-bold text-navy-deep">
-                        Valor da Multa por Falta (R$):
-                      </label>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-surface-container-low p-2.5 rounded-xl border border-surface-container-high/50 shrink-0">
+                    <div className="flex items-center justify-between sm:justify-start gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-red-600 text-[18px]">payments</span>
+                        <label className="text-xs font-bold text-navy-deep">
+                          Multa (R$):
+                        </label>
+                      </div>
                       <input
                         type="number"
                         min="0"
                         value={fineAmountValue}
                         onChange={(e) => setFineAmountValue(Math.max(0, Number(e.target.value) || 0))}
-                        className="w-20 px-2.5 py-1 rounded-lg bg-white border border-surface-container-high font-headline-sm text-sm font-bold text-red-700 text-center outline-none"
+                        className="w-20 px-2 py-1 rounded-lg bg-white border border-surface-container-high font-headline-sm text-sm font-bold text-red-700 text-center outline-none"
                       />
                     </div>
 
@@ -2579,9 +2667,9 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                           });
                           setAttendanceMap(next);
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[11px] font-bold transition-all"
+                        className="flex-1 sm:flex-initial px-2.5 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[11px] font-bold transition-all text-center"
                       >
-                        Marcar Todos Presentes
+                        Todos Presentes
                       </button>
 
                       <button
@@ -2594,16 +2682,16 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                           });
                           setAttendanceMap(next);
                         }}
-                        className="px-2.5 py-1 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-navy-deep text-[11px] font-bold transition-all"
+                        className="flex-1 sm:flex-initial px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-navy-deep text-[11px] font-bold transition-all text-center"
                         title="Usar exatamente quem marcou 'Na Quadra' durante a pelada"
                       >
-                        Usar Check-in da Quadra
+                        Sincronizar Check-in
                       </button>
                     </div>
                   </div>
 
                   {/* Lista Rolável de Atletas para Conferência de Presença e Multa */}
-                  <div className="flex flex-col gap-2 overflow-y-auto pr-1 flex-1 min-h-[220px]">
+                  <div className="flex flex-col gap-2 overflow-y-auto min-h-0 flex-1 pr-1">
                     {convokedList.map(({ player, teamName }) => {
                       const attended = !!attendanceMap[player.id];
                       const willFine = finedMap[player.id] !== false;
@@ -2611,7 +2699,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                       return (
                         <div
                           key={player.id}
-                          className={`p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-all ${
+                          className={`p-2.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition-all ${
                             attended
                               ? 'bg-emerald-50/50 border-emerald-500/30'
                               : willFine
@@ -2623,10 +2711,10 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                             <img
                               src={player.photoUrl}
                               alt={player.name}
-                              className="w-9 h-9 rounded-full object-cover shrink-0 border border-surface-container-high"
+                              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full object-cover shrink-0 border border-surface-container-high"
                               referrerPolicy="no-referrer"
                             />
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="font-headline-sm text-xs sm:text-sm text-navy-deep font-bold truncate">
                                 {player.name}
                               </p>
@@ -2651,16 +2739,16 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                                   [player.id]: !attended
                                 }));
                               }}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all active:scale-95 ${
+                              className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 ${
                                 attended
                                   ? 'bg-emerald-600 text-white shadow-xs'
                                   : 'bg-red-600 text-white shadow-xs'
                               }`}
                             >
-                              <span className="material-symbols-outlined text-[15px]">
+                              <span className="material-symbols-outlined text-[14px]">
                                 {attended ? 'check_circle' : 'cancel'}
                               </span>
-                              <span>{attended ? 'Participou' : 'Não Compareceu'}</span>
+                              <span>{attended ? 'Participou' : 'Faltou'}</span>
                             </button>
 
                             {!attended && (
@@ -2682,7 +2770,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                                 <span className="material-symbols-outlined text-[14px]">
                                   {willFine ? 'gavel' : 'verified_user'}
                                 </span>
-                                <span>{willFine ? `Multar (R$ ${fineAmountValue})` : 'Isento de Multa'}</span>
+                                <span>{willFine ? `Multar (R$ ${fineAmountValue})` : 'Isento'}</span>
                               </button>
                             )}
                           </div>
@@ -2692,35 +2780,30 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                   </div>
 
                   {/* Rodapé de Confirmação */}
-                  <div className="flex items-center justify-between gap-2 pt-3 border-t border-surface-container-high/50 shrink-0 flex-wrap">
-                    <span className="text-[11px] text-outline">
-                      Atletas multados ficam automaticamente como <strong>Suplentes</strong> na próxima pelada.
-                    </span>
-
-                    <div className="flex items-center gap-2 ml-auto">
-                      <button
-                        type="button"
-                        onClick={() => setIsFinishModalOpen(false)}
-                        className="px-4 py-2.5 rounded-xl bg-surface-container text-navy-deep font-label-md text-xs font-bold"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleConfirmFinishPelada}
-                        disabled={isFinishingPelada}
-                        className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-800 text-white font-headline-sm text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-lg shadow-red-900/25 active:scale-95 transition-all disabled:opacity-50"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">flag</span>
-                        <span>{isFinishingPelada ? 'Encerrando...' : 'Confirmar Encerramento da Pelada'}</span>
-                      </button>
-                    </div>
+                  <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-surface-container-high/50 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsFinishModalOpen(false)}
+                      className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-surface-container text-navy-deep font-label-md text-xs font-bold active:scale-95"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmFinishPelada}
+                      disabled={isFinishingPelada}
+                      className="px-4 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-800 text-white font-headline-sm text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow-lg shadow-red-900/25 active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">flag</span>
+                      <span>{isFinishingPelada ? 'Salvando...' : 'Salvar Relatório'}</span>
+                    </button>
                   </div>
                 </>
               );
             })()}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

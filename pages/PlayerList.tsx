@@ -257,11 +257,11 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
             </div>
             <div className="min-w-0">
               <h2 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold truncate">
-                Lista Oficial • {confirmed.length}/{totalSlots} Titulares
+                Lista Oficial • {confirmed.length}/{totalSlots} Confirmados
               </h2>
               <p className="font-body-sm text-xs text-outline truncate">
                 {remainingSlots === 0 
-                  ? 'Vagas titulares completas • Novos confirmados entram na suplência'
+                  ? 'Vagas completas • Novos confirmados entram na suplência'
                   : `Restam ${remainingSlots} vagas para fechar as 5 equipes`}
               </p>
             </div>
@@ -332,25 +332,27 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+          {isCurrentUserAdmin && (
+            <button 
+              onClick={() => setSelectedFilter('all')}
+              className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
+                selectedFilter === 'all' 
+                  ? 'bg-navy-deep text-on-secondary shadow-xs' 
+                  : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
+              }`}
+            >
+              Todos ({players.length})
+            </button>
+          )}
           <button 
-            onClick={() => setSelectedFilter('all')}
+            onClick={() => setSelectedFilter(isCurrentUserAdmin ? 'confirmed' : 'all')}
             className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
-              selectedFilter === 'all' 
+              (isCurrentUserAdmin ? selectedFilter === 'confirmed' : (selectedFilter === 'all' || selectedFilter === 'confirmed'))
                 ? 'bg-navy-deep text-on-secondary shadow-xs' 
                 : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
             }`}
           >
-            {isCurrentUserAdmin ? `Todos (${players.length})` : `Confirmados (${sortedPresent.length})`}
-          </button>
-          <button 
-            onClick={() => setSelectedFilter('confirmed')}
-            className={`whitespace-nowrap px-3 py-1.5 rounded-lg font-label-md text-xs font-semibold transition-all active:scale-95 ${
-              selectedFilter === 'confirmed' 
-                ? 'bg-navy-deep text-on-secondary shadow-xs' 
-                : 'bg-surface-container-lowest text-navy-deep border border-surface-container-high/40'
-            }`}
-          >
-            Titulares ({confirmed.length})
+            Confirmados ({confirmed.length})
           </button>
           {waitingList.length > 0 && (
             <button 
@@ -506,7 +508,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                     ) : waitingIdx < 0 ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-label-md text-[11px] font-bold bg-tertiary-fixed text-on-tertiary-fixed">
                         <span className="w-1.5 h-1.5 rounded-full bg-tertiary"></span>
-                        TITULAR
+                        CONFIRMADO
                       </span>
                     ) : null}
 
@@ -531,10 +533,10 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                       <button
                         onClick={() => handlePullToMatch(player.id)}
                         className="text-[11px] font-bold text-primary-container hover:underline flex items-center gap-0.5 active:scale-95"
-                        title="Promover da fila de espera para titular"
+                        title="Promover da fila de espera para confirmado"
                       >
                         <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
-                        <span>Titular</span>
+                        <span>Confirmar</span>
                       </button>
                     )}
 
@@ -590,13 +592,14 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
       {/* MODAL: EDITAR ATLETA & GOLS MARCADOS (PORTALIZADO PARA EVITAR TELA AZUL E COM TOTAL RESPONSIVIDADE) */}
       {selectedPlayerForStats && typeof document !== 'undefined' && createPortal(
         <div 
-          className="fixed inset-0 z-[99999] bg-navy-deep/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
           onClick={(e) => {
             if (e.target === e.currentTarget) setSelectedPlayerForStats(null);
           }}
         >
           <div 
-            className="bg-white text-navy-deep rounded-2xl sm:rounded-3xl p-4 sm:p-6 w-full max-w-lg shadow-2xl border border-surface-container-high/60 my-auto flex flex-col gap-4 relative max-h-[92vh] overflow-hidden animate-fade-in"
+            className="bg-white text-navy-deep rounded-2xl sm:rounded-3xl p-4 sm:p-6 w-full max-w-lg max-h-[90dvh] shadow-2xl border border-surface-container-high/60 flex flex-col gap-4 relative overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -628,7 +631,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
             </div>
 
             {/* Modal Scrollable Body */}
-            <div className="flex flex-col gap-3.5 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-3.5 overflow-y-auto min-h-0 flex-1 pr-1">
               {/* NOME DO ATLETA */}
               <div>
                 <label className="font-label-md text-xs sm:text-sm text-navy-deep font-bold block mb-1">

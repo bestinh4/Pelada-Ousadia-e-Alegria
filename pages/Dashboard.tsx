@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Match, Player, Page } from '../types.ts';
 import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
@@ -448,10 +449,19 @@ const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* MODAL: DEFINIR VALORES DE AVULSOS, MENSALISTAS E MULTAS (DIRETORIA) */}
-      {isEditingPrices && isCurrentUserAdmin && (
-        <div className="fixed inset-0 z-50 bg-navy-deep/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest max-w-md w-full rounded-2xl p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 animate-pop-in">
-            <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-3">
+      {isEditingPrices && isCurrentUserAdmin && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsEditingPrices(false);
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep max-w-md w-full max-h-[88dvh] rounded-2xl p-4 sm:p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-3 shrink-0">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary-container text-[22px]">payments</span>
                 <div>
@@ -462,6 +472,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsEditingPrices(false)}
                 className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep"
               >
@@ -469,7 +480,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 overflow-y-auto min-h-0 flex-1 pr-1">
               <div>
                 <label className="font-label-md text-xs text-navy-deep font-bold block mb-1">
                   Valor Mensalista (R$)
@@ -513,14 +524,16 @@ const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-surface-container-high/40">
+            <div className="flex justify-end gap-2 pt-3 border-t border-surface-container-high/40 shrink-0">
               <button 
+                type="button"
                 onClick={() => setIsEditingPrices(false)}
                 className="px-4 py-2 rounded-xl bg-surface-container-high text-on-surface font-label-md text-xs font-bold"
               >
                 Cancelar
               </button>
               <button 
+                type="button"
                 onClick={handleSaveFinancePrices}
                 disabled={isSavingPrices}
                 className="px-5 py-2 rounded-xl bg-primary-container text-on-primary font-headline-sm text-xs font-bold shadow-md active:scale-95 disabled:opacity-50"
@@ -529,19 +542,30 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL PARA CADASTRAR NOVO ATLETA (ADMIN) */}
-      {isAddingManual && (
-        <div className="fixed inset-0 z-50 bg-navy-deep/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-surface-container-lowest max-w-md w-full rounded-2xl p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 animate-pop-in">
-            <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-3">
+      {isAddingManual && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsAddingManual(false);
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep max-w-md w-full max-h-[88dvh] rounded-2xl p-4 sm:p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-surface-container-high/40 pb-3 shrink-0">
               <h3 className="font-headline-sm text-headline-sm text-navy-deep font-bold flex items-center gap-2">
                 <span className="material-symbols-outlined text-primary-container text-[22px]">person_add</span>
                 Cadastrar Novo Atleta
               </h3>
               <button 
+                type="button"
                 onClick={() => setIsAddingManual(false)}
                 className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep"
               >
@@ -549,7 +573,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 overflow-y-auto min-h-0 flex-1 pr-1">
               <div>
                 <label className="font-label-md text-xs text-outline block mb-1">Nome Completo / Apelido</label>
                 <input 
@@ -617,14 +641,16 @@ const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-surface-container-high/40 mt-1">
+            <div className="flex justify-end gap-2 pt-3 border-t border-surface-container-high/40 shrink-0">
               <button 
+                type="button"
                 onClick={() => setIsAddingManual(false)}
                 className="px-4 py-2 rounded-xl bg-surface-container-high text-on-surface font-label-md"
               >
                 Cancelar
               </button>
               <button 
+                type="button"
                 onClick={handleCreateManualPlayer}
                 disabled={isCreating}
                 className="px-5 py-2 rounded-xl bg-primary-container text-on-primary font-headline-sm flex items-center gap-1 shadow-md shadow-primary/20 active:scale-95 disabled:opacity-50"
@@ -633,7 +659,8 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

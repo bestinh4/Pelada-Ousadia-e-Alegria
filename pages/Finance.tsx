@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Player, Page, Expense, Match } from '../types.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { db, doc, updateDoc, setDoc, onSnapshot, collection, addDoc, deleteDoc } from '../services/firebase.ts';
@@ -467,10 +468,19 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
       )}
 
       {/* MODAL: DEFINIR VALORES DE MENSALISTA, AVULSO E MULTA */}
-      {isEditingPrices && (
-        <div className="fixed inset-0 bg-navy-deep/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-canvas-white rounded-2xl p-5 sm:p-6 w-full max-w-md shadow-2xl flex flex-col gap-4 animate-pop-in">
-            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-3">
+      {isEditingPrices && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsEditingPrices(false);
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[88dvh] shadow-2xl flex flex-col gap-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-3 shrink-0">
               <div>
                 <h3 className="font-headline-sm text-base text-navy-deep font-bold">
                   DEFINIR VALORES & MULTAS
@@ -478,6 +488,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                 <p className="text-xs text-outline">Configuração oficial da Diretoria</p>
               </div>
               <button
+                type="button"
                 onClick={() => setIsEditingPrices(false)}
                 className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center text-outline hover:text-navy-deep"
               >
@@ -485,7 +496,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
               </button>
             </div>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 overflow-y-auto min-h-0 flex-1 pr-1">
               <div>
                 <label className="font-label-md text-xs text-navy-deep font-bold block mb-1">
                   Valor Mensalista (R$)
@@ -529,14 +540,16 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container-high/40">
+            <div className="flex justify-end gap-2 pt-2 border-t border-surface-container-high/40 shrink-0">
               <button
+                type="button"
                 onClick={() => setIsEditingPrices(false)}
                 className="px-4 py-2 rounded-xl bg-surface-container-high text-on-surface font-label-md text-xs font-bold"
               >
                 Cancelar
               </button>
               <button
+                type="button"
                 onClick={handleSavePrices}
                 disabled={isSavingPrices}
                 className="px-5 py-2 rounded-xl bg-primary-container text-on-primary font-headline-sm text-xs font-bold shadow-md active:scale-95 disabled:opacity-50"
@@ -545,13 +558,23 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* MODAL: NOVA DESPESA */}
-      {isAddingExpense && (
-        <div className="fixed inset-0 bg-navy-deep/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-canvas-white rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col gap-4">
+      {isAddingExpense && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 99999 }}
+          className="bg-navy-deep/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsAddingExpense(false);
+          }}
+        >
+          <div 
+            className="bg-white text-navy-deep rounded-2xl p-5 sm:p-6 w-full max-w-md shadow-2xl flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="font-headline-lg-mobile text-headline-lg-mobile text-navy-deep">
               LANÇAR DESPESA
             </h3>
@@ -572,10 +595,11 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setIsAddingExpense(false)} className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface font-label-md">
+              <button type="button" onClick={() => setIsAddingExpense(false)} className="px-4 py-2 rounded-lg bg-surface-container-high text-on-surface font-label-md">
                 Cancelar
               </button>
               <button 
+                type="button"
                 onClick={handleCreateExpense} 
                 disabled={isSavingExpense}
                 className="px-5 py-2 rounded-lg bg-primary-container text-on-primary font-headline-sm"
@@ -584,7 +608,8 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
