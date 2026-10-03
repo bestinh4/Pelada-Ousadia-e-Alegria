@@ -24,6 +24,7 @@ export interface Player {
   };
   // Fix: Adding financial tracking properties used in Ranking.tsx
   monthlyPaid?: boolean;
+  monthlyPaidMonth?: string; // e.g. '2026-10'
   paymentStatus?: 'pago' | 'pendente';
   lastPaymentAt?: string;
   lastPaymentAmount?: number;

@@ -5,6 +5,7 @@ import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { db, doc, updateDoc, setDoc, onSnapshot, collection, addDoc, deleteDoc, query, orderBy, limit } from '../services/firebase.ts';
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
 import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
+import { getCurrentMonthKey, getMonthName, getMensalistaPaymentInfo, MENSALISTA_DUE_DAY } from '../utils/mensalistaUtils.ts';
 
 const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | null, onPageChange: (page: Page) => void }> = ({ players, currentUser, match, onPageChange }) => {
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -43,6 +44,9 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [newExpense, setNewExpense] = useState({ description: '', amount: 0, category: 'Outros' });
   const [isSavingExpense, setIsSavingExpense] = useState(false);
+  const [isSyncingMensalistas, setIsSyncingMensalistas] = useState(false);
+  const [mensalistasSyncSuccess, setMensalistasSyncSuccess] = useState(false);
+  const hasAutoSyncedMensalistas = React.useRef(false);
 
   const currentPlayer = players.find(p => 
     p.id === currentUser?.uid || 
@@ -50,6 +54,54 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   );
   const isMasterUser = currentUser?.email === MASTER_ADMIN_EMAIL;
   const isUserAdmin = currentPlayer?.role === 'admin' || isMasterUser;
+
+  const currentMonthKey = getCurrentMonthKey();
+  const currentMonthName = getMonthName();
+
+  // Sincronização automática: Todos os mensalistas já estão pagos para este mês
+  useEffect(() => {
+    if (!isUserAdmin || players.length === 0 || hasAutoSyncedMensalistas.current) return;
+    hasAutoSyncedMensalistas.current = true;
+
+    const mensalistasToUpdate = players.filter(
+      p => p.playerType === 'mensalista' && (!p.monthlyPaid || p.monthlyPaidMonth !== currentMonthKey)
+    );
+
+    if (mensalistasToUpdate.length > 0) {
+      console.log(`[Finance] Marcando ${mensalistasToUpdate.length} mensalista(s) como pagos para o mês atual (${currentMonthKey})...`);
+      Promise.all(
+        mensalistasToUpdate.map(p =>
+          updateDoc(doc(db, "players", p.id), {
+            monthlyPaid: true,
+            monthlyPaidMonth: currentMonthKey
+          }).catch(e => console.error("Erro ao atualizar mensalista:", e))
+        )
+      ).catch(() => {});
+    }
+  }, [players, isUserAdmin, currentMonthKey]);
+
+  const handleMarkAllMensalistasPaid = async () => {
+    if (!isUserAdmin) return;
+    setIsSyncingMensalistas(true);
+    try {
+      const allMensalistas = players.filter(p => p.playerType === 'mensalista');
+      await Promise.all(
+        allMensalistas.map(p =>
+          updateDoc(doc(db, "players", p.id), {
+            monthlyPaid: true,
+            monthlyPaidMonth: currentMonthKey
+          })
+        )
+      );
+      setMensalistasSyncSuccess(true);
+      setTimeout(() => setMensalistasSyncSuccess(false), 3000);
+      alert(`✅ Todos os ${allMensalistas.length} mensalistas foram confirmados como PAGOS para ${currentMonthName}!`);
+    } catch {
+      alert("Erro ao atualizar status dos mensalistas.");
+    } finally {
+      setIsSyncingMensalistas(false);
+    }
+  };
 
   useEffect(() => {
     const unsubPrices = onSnapshot(doc(db, "settings", "finance"), (docSnap) => {
@@ -190,7 +242,9 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
       const isMensalista = player.playerType === 'mensalista';
       const updates: any = {};
       if (isMensalista) {
-        updates.monthlyPaid = !player.monthlyPaid;
+        const nextPaid = !player.monthlyPaid;
+        updates.monthlyPaid = nextPaid;
+        updates.monthlyPaidMonth = nextPaid ? currentMonthKey : null;
       } else {
         updates.paymentStatus = player.paymentStatus === 'pago' ? 'pendente' : 'pago';
       }
@@ -340,6 +394,62 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
       {/* CONTENT: RECEITAS, MULTAS OU DESPESAS */}
       {finView === 'receitas' ? (
         <div className="flex flex-col gap-space-sm">
+          {/* BANNER REGULAMENTO DOS MENSALISTAS (VENCIMENTO DIA 10) */}
+          {(() => {
+            const allMensalistas = players.filter(p => p.playerType === 'mensalista');
+            const paidMensalistas = allMensalistas.filter(p => p.monthlyPaid && (p.monthlyPaidMonth === currentMonthKey || !p.monthlyPaidMonth));
+            const nextMonthDate = new Date();
+            nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
+            const nextMonthName = nextMonthDate.toLocaleDateString('pt-BR', { month: 'long' });
+
+            return (
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-surface-container-lowest border border-emerald-500/40 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start sm:items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <span className="material-symbols-outlined text-[22px]">calendar_month</span>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-950 font-label-md text-[10px] font-bold uppercase tracking-wider">
+                        📅 VENCIMENTO TODO DIA 10
+                      </span>
+                      <span className="text-[11px] font-bold text-emerald-800">
+                        Mês Vigente: {currentMonthName.toUpperCase()}
+                      </span>
+                    </div>
+                    <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep mt-0.5">
+                      {paidMensalistas.length === allMensalistas.length
+                        ? `Todos os ${allMensalistas.length} mensalistas já estão pagos para este mês (${currentMonthName})!`
+                        : `${paidMensalistas.length} de ${allMensalistas.length} mensalistas pagos neste mês`}
+                    </h4>
+                    <p className="text-[11px] text-outline leading-snug">
+                      Regra oficial: Para o próximo mês ({nextMonthName}), o prazo para efetuar o pagamento é <strong>até o dia 10/{String(nextMonthDate.getMonth() + 1).padStart(2, '0')}</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleMarkAllMensalistasPaid}
+                    disabled={isSyncingMensalistas}
+                    className="w-full sm:w-auto min-h-[38px] px-3.5 py-1.5 rounded-xl bg-white hover:bg-surface-container text-emerald-900 border border-emerald-300 font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition-all shrink-0"
+                    title="Confirmar todos os mensalistas como pagos neste mês"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-emerald-700">done_all</span>
+                    <span>
+                      {isSyncingMensalistas
+                        ? 'Atualizando...'
+                        : mensalistasSyncSuccess
+                          ? 'Todos Pagos! ✓'
+                          : 'Marcar Mensalistas Pagos'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Subfilter */}
           <div className="flex gap-2">
             {(['todos', 'pendentes', 'pagos'] as const).map(f => (
@@ -375,7 +485,11 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                         {player.name}
                       </h4>
                       <p className="font-body-sm text-body-sm text-outline break-words">
-                        {player.position} • {player.playerType === 'mensalista' ? 'Mensalista' : 'Avulso'}
+                        {player.position} • {player.playerType === 'mensalista' ? (
+                          <span className="font-semibold text-emerald-800">
+                            Mensalista • Mês Pago ✓ (Venc. Dia 10)
+                          </span>
+                        ) : 'Avulso'}
                       </p>
                       {player.lastReceiptSummary && isPaid && (
                         <p className="text-[11px] text-emerald-700 font-semibold mt-0.5 truncate">

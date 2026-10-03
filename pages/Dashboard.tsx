@@ -7,6 +7,7 @@ import { getNotificationStatus, requestNotificationPermission, broadcastNotifica
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
 import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
+import { getCurrentMonthKey, getMonthName, getMensalistaPaymentInfo, MENSALISTA_DUE_DAY } from '../utils/mensalistaUtils.ts';
 import { playSound } from '../utils/sound.ts';
 
 interface DashboardProps {
@@ -123,6 +124,27 @@ const Dashboard: React.FC<DashboardProps> = ({
 
     checkSharedReceipt();
   }, []);
+
+  // Garante que todos os mensalistas estejam marcados como pagos para o mês atual
+  const hasAutoSyncedMensalistasRef = React.useRef(false);
+  useEffect(() => {
+    if (players.length === 0 || hasAutoSyncedMensalistasRef.current) return;
+    hasAutoSyncedMensalistasRef.current = true;
+    const currentMonthKey = getCurrentMonthKey();
+    const mensalistasToUpdate = players.filter(
+      p => p.playerType === 'mensalista' && (!p.monthlyPaid || p.monthlyPaidMonth !== currentMonthKey)
+    );
+    if (mensalistasToUpdate.length > 0) {
+      Promise.all(
+        mensalistasToUpdate.map(p =>
+          updateDoc(doc(db, "players", p.id), {
+            monthlyPaid: true,
+            monthlyPaidMonth: currentMonthKey
+          }).catch(() => {})
+        )
+      ).catch(() => {});
+    }
+  }, [players]);
 
   const handleSaveFinancePrices = async () => {
     if (!isCurrentUserAdmin) return;
@@ -396,6 +418,8 @@ const Dashboard: React.FC<DashboardProps> = ({
     if (!newPlayerData.name.trim()) return alert("Digite o nome do atleta!");
     setIsCreating(true);
     try {
+      const isMensal = newPlayerData.playerType === 'mensalista';
+      const curMonth = getCurrentMonthKey();
       await addDoc(collection(db, "players"), {
         ...newPlayerData,
         goals: Number(newPlayerData.goals) || 0,
@@ -403,7 +427,9 @@ const Dashboard: React.FC<DashboardProps> = ({
         role: 'player',
         photoUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(newPlayerData.name)}&background=003a75&color=fff&size=256`,
         createdAt: new Date().toISOString(),
-        confirmedAt: newPlayerData.status === 'presente' ? new Date().toISOString() : null
+        confirmedAt: newPlayerData.status === 'presente' ? new Date().toISOString() : null,
+        monthlyPaid: isMensal ? true : false,
+        monthlyPaidMonth: isMensal ? curMonth : null
       });
       setIsAddingManual(false);
       setNewPlayerData({ name: '', position: 'Atacante', playerType: 'avulso', status: 'presente', goals: 0 });
@@ -758,7 +784,8 @@ const Dashboard: React.FC<DashboardProps> = ({
             (() => {
               const isGoleiroExempt = currentPlayer.position === 'Goleiro';
               const isMensal = currentPlayer.playerType === 'mensalista';
-              const isPaidNow = isGoleiroExempt || (isMensal ? Boolean(currentPlayer.monthlyPaid) : currentPlayer.paymentStatus === 'pago');
+              const mensalistaInfo = isMensal ? getMensalistaPaymentInfo(currentPlayer) : null;
+              const isPaidNow = isGoleiroExempt || (isMensal ? Boolean(mensalistaInfo?.isPaid) : currentPlayer.paymentStatus === 'pago');
               const hasFineNow = Boolean(currentPlayer.hasNoShowFine || currentPlayer.hasLateRemovalFine);
               const fineValNow = hasFineNow ? (currentPlayer.fineAmount || prices.multa || 20) : 0;
               const baseValNow = isGoleiroExempt ? 0 : (isMensal ? prices.mensalista : prices.avulso);
@@ -771,7 +798,9 @@ const Dashboard: React.FC<DashboardProps> = ({
                       ? 'bg-emerald-50/70 border-emerald-300/70'
                       : hasFineNow
                         ? 'bg-red-50/70 border-red-300/80'
-                        : 'bg-surface-container-low border-surface-container-high/70'
+                        : isMensal && mensalistaInfo?.isOverdue
+                          ? 'bg-red-50/70 border-red-300/80'
+                          : 'bg-surface-container-low border-surface-container-high/70'
                   }`}
                 >
                   <div className="flex items-start sm:items-center gap-3 min-w-0">
@@ -779,7 +808,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${
                         isPaidNow && !hasFineNow
                           ? 'bg-emerald-600 text-white'
-                          : hasFineNow
+                          : hasFineNow || (isMensal && mensalistaInfo?.isOverdue)
                             ? 'bg-red-600 text-white'
                             : 'bg-[#32BCAD]/15 text-[#32BCAD] border border-[#32BCAD]/30'
                       }`}
@@ -787,14 +816,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                       {isPaidNow && !hasFineNow ? (
                         <span className="material-symbols-outlined text-[22px]">verified</span>
                       ) : (
-                        <PixIcon className="w-5 h-5" color={hasFineNow ? '#ffffff' : '#32BCAD'} />
+                        <PixIcon className="w-5 h-5" color={hasFineNow || (isMensal && mensalistaInfo?.isOverdue) ? '#ffffff' : '#32BCAD'} />
                       )}
                     </div>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-outline">
-                          {isMensal ? 'Mensalidade Oficial' : 'Taxa da Pelada (Avulso)'}
+                          {isMensal ? 'Mensalidade Oficial (Vencimento Dia 10)' : 'Taxa da Pelada (Avulso)'}
                         </span>
                         <span className="text-outline">·</span>
                         {isGoleiroExempt && !hasFineNow ? (
@@ -803,11 +832,15 @@ const Dashboard: React.FC<DashboardProps> = ({
                           </span>
                         ) : isPaidNow && !hasFineNow ? (
                           <span className="text-[11px] font-bold text-emerald-700 uppercase">
-                            Pagamento Confirmado ✅
+                            {isMensal ? 'Mensalidade Paga ✅' : 'Pagamento Confirmado ✅'}
+                          </span>
+                        ) : isMensal && mensalistaInfo?.isOverdue ? (
+                          <span className="text-[11px] font-bold text-red-800 uppercase">
+                            Mensalidade Vencida ⚠️
                           </span>
                         ) : (
                           <span className="text-[11px] font-bold text-amber-800 uppercase">
-                            Aguardando Pagamento ⏳
+                            {isMensal ? 'Aguardando Pagamento (Até dia 10) ⏳' : 'Aguardando Pagamento ⏳'}
                           </span>
                         )}
                       </div>
@@ -816,17 +849,29 @@ const Dashboard: React.FC<DashboardProps> = ({
                         {isPaidNow && !hasFineNow ? (
                           isGoleiroExempt ? (
                             'Goleiros titulares possuem isenção na pelada'
+                          ) : isMensal ? (
+                            `Sua mensalidade de ${getMonthName()} (R$ ${prices.mensalista},00) está confirmada!`
                           ) : (
-                            `Seu pagamento (${isMensal ? `R$ ${prices.mensalista},00` : `R$ ${prices.avulso},00`}) já está confirmado!`
+                            `Seu pagamento (R$ ${prices.avulso},00) já está confirmado!`
                           )
                         ) : hasFineNow && !isPaidNow ? (
                           `Total a pagar: R$ ${totalDueNow},00 (${isMensal ? 'Mensal' : 'Pelada'} R$ ${baseValNow} + Multa R$ ${fineValNow})`
                         ) : hasFineNow ? (
                           `Você possui uma multa pendente de R$ ${fineValNow},00`
+                        ) : isMensal ? (
+                          mensalistaInfo?.isOverdue
+                            ? `Mensalidade vencida em ${mensalistaInfo.deadlineDateFormatted}. Pague R$ ${baseValNow},00 no Pix para regularizar sua vaga.`
+                            : `Valor: R$ ${baseValNow},00 • Prazo para pagamento até ${mensalistaInfo?.deadlineDateFormatted} (${mensalistaInfo?.daysRemaining} dias restantes)`
                         ) : (
                           `Valor: R$ ${baseValNow},00 • Pague no Pix e envie o comprovante para baixa automática`
                         )}
                       </h4>
+
+                      {isMensal && isPaidNow && !hasFineNow && (
+                        <p className="text-[11px] text-emerald-800 font-semibold mt-0.5">
+                          Próximo vencimento: {mensalistaInfo?.nextDueDateFormatted} (prazo até dia 10)
+                        </p>
+                      )}
 
                       {currentPlayer.lastReceiptSummary && isPaidNow && (
                         <p className="text-[11px] text-emerald-800 font-medium mt-0.5 truncate">

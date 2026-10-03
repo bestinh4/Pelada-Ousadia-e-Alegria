@@ -4,6 +4,7 @@ import { Player, Match, PixConfig } from '../types.ts';
 import { generatePixPayload } from '../utils/pixUtils.ts';
 import { db, doc, updateDoc, collection, addDoc, getDocs, query, where } from '../services/firebase.ts';
 import { playSound } from '../utils/sound.ts';
+import { getCurrentMonthKey, getMensalistaPaymentInfo, getMonthName } from '../utils/mensalistaUtils.ts';
 
 interface PixPaymentModalProps {
   isOpen: boolean;
@@ -166,15 +167,15 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
 
   const paymentLabel = (() => {
     if (!isBasePaid && hasFine && includeFine) {
-      return `${isMensalista ? 'Mensalidade' : 'Pelada Avulso'} (R$ ${basePrice}) + Multa (R$ ${fineValue})`;
+      return `${isMensalista ? 'Mensalidade (Venc. Dia 10)' : 'Pelada Avulso'} (R$ ${basePrice}) + Multa (R$ ${fineValue})`;
     }
     if (!isBasePaid) {
-      return isMensalista ? 'Mensalidade Oficial' : 'Taxa da Pelada (Avulso)';
+      return isMensalista ? `Mensalidade Oficial (Vencimento até dia 10)` : 'Taxa da Pelada (Avulso)';
     }
     if (hasFine) {
       return 'Quitação de Multa Pendente';
     }
-    return isMensalista ? 'Mensalidade Oficial' : 'Taxa da Pelada (Avulso)';
+    return isMensalista ? `Mensalidade de ${getMonthName()} (Quitada ✓ • Próx: Dia 10)` : 'Taxa da Pelada (Avulso)';
   })();
 
   const pixCopiaECola = generatePixPayload({
@@ -318,6 +319,7 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
       if (!isBasePaid) {
         if (isMensalista) {
           playerUpdates.monthlyPaid = true;
+          playerUpdates.monthlyPaidMonth = getCurrentMonthKey();
         } else {
           playerUpdates.paymentStatus = 'pago';
         }
