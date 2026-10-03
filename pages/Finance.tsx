@@ -58,25 +58,31 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   const currentMonthKey = getCurrentMonthKey();
   const currentMonthName = getMonthName();
 
-  // Sincronização automática: Todos os mensalistas já estão pagos para este mês
+  // Correção: O mês de outubro ainda não está pago. Reseta os mensalistas para aberto até dia 10.
+  const hasResetOctoberMensalistas = React.useRef(false);
   useEffect(() => {
-    if (!isUserAdmin || players.length === 0 || hasAutoSyncedMensalistas.current) return;
-    hasAutoSyncedMensalistas.current = true;
+    if (!isUserAdmin || players.length === 0 || hasResetOctoberMensalistas.current) return;
+    const hasAlreadyReset = localStorage.getItem('oa_mensalistas_oct_reset_v2');
+    if (hasAlreadyReset) return;
+    hasResetOctoberMensalistas.current = true;
 
-    const mensalistasToUpdate = players.filter(
-      p => p.playerType === 'mensalista' && (!p.monthlyPaid || p.monthlyPaidMonth !== currentMonthKey)
+    const mensalistasToReset = players.filter(
+      p => p.playerType === 'mensalista' && (p.monthlyPaid || p.monthlyPaidMonth === currentMonthKey)
     );
 
-    if (mensalistasToUpdate.length > 0) {
-      console.log(`[Finance] Marcando ${mensalistasToUpdate.length} mensalista(s) como pagos para o mês atual (${currentMonthKey})...`);
+    if (mensalistasToReset.length > 0) {
       Promise.all(
-        mensalistasToUpdate.map(p =>
+        mensalistasToReset.map(p =>
           updateDoc(doc(db, "players", p.id), {
-            monthlyPaid: true,
-            monthlyPaidMonth: currentMonthKey
-          }).catch(e => console.error("Erro ao atualizar mensalista:", e))
+            monthlyPaid: false,
+            monthlyPaidMonth: null
+          }).catch(e => console.error("Erro ao resetar mensalista:", e))
         )
-      ).catch(() => {});
+      ).then(() => {
+        localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
+      }).catch(() => {});
+    } else {
+      localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
     }
   }, [players, isUserAdmin, currentMonthKey]);
 
@@ -216,10 +222,18 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
     return isGoleiro || isAdminExempt;
   };
 
+  const checkIsPlayerPaid = (p: Player) => {
+    if (checkIsExempt(p)) return true;
+    if (p.playerType === 'mensalista') {
+      return Boolean(p.monthlyPaid && p.monthlyPaidMonth === currentMonthKey);
+    }
+    return p.paymentStatus === 'pago';
+  };
+
   const totals = activePlayers.reduce((acc, p) => {
     if (checkIsExempt(p)) return acc;
     const val = p.playerType === 'mensalista' ? prices.mensalista : prices.avulso;
-    const paid = p.playerType === 'mensalista' ? p.monthlyPaid : p.paymentStatus === 'pago';
+    const paid = checkIsPlayerPaid(p);
     if (paid) acc.paid += val; else acc.pending += val;
     return acc;
   }, { paid: 0, pending: 0 });
@@ -231,7 +245,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
     if (filter === 'todos') return true;
     const isExempt = checkIsExempt(p);
     if (isExempt) return filter === 'pagos';
-    const isPaid = p.playerType === 'mensalista' ? p.monthlyPaid : p.paymentStatus === 'pago';
+    const isPaid = checkIsPlayerPaid(p);
     return filter === 'pagos' ? isPaid : !isPaid;
   });
 
@@ -397,10 +411,8 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
           {/* BANNER REGULAMENTO DOS MENSALISTAS (VENCIMENTO DIA 10) */}
           {(() => {
             const allMensalistas = players.filter(p => p.playerType === 'mensalista');
-            const paidMensalistas = allMensalistas.filter(p => p.monthlyPaid && (p.monthlyPaidMonth === currentMonthKey || !p.monthlyPaidMonth));
-            const nextMonthDate = new Date();
-            nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
-            const nextMonthName = nextMonthDate.toLocaleDateString('pt-BR', { month: 'long' });
+            const paidMensalistas = allMensalistas.filter(p => p.monthlyPaid && p.monthlyPaidMonth === currentMonthKey);
+            const pendingMensalistas = allMensalistas.filter(p => !p.monthlyPaid || p.monthlyPaidMonth !== currentMonthKey);
 
             return (
               <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-surface-container-lowest border border-emerald-500/40 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -411,19 +423,19 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-950 font-label-md text-[10px] font-bold uppercase tracking-wider">
-                        📅 VENCIMENTO TODO DIA 10
+                        📅 MENSALISTAS • VENCIMENTO DIA 10
                       </span>
                       <span className="text-[11px] font-bold text-emerald-800">
-                        Mês Vigente: {currentMonthName.toUpperCase()}
+                        {currentMonthName.toUpperCase()}
                       </span>
                     </div>
                     <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep mt-0.5">
-                      {paidMensalistas.length === allMensalistas.length
-                        ? `Todos os ${allMensalistas.length} mensalistas já estão pagos para este mês (${currentMonthName})!`
-                        : `${paidMensalistas.length} de ${allMensalistas.length} mensalistas pagos neste mês`}
+                      {paidMensalistas.length === allMensalistas.length && allMensalistas.length > 0
+                        ? `Todos os ${allMensalistas.length} mensalistas estão com o mês pago!`
+                        : `${pendingMensalistas.length} mensalista(s) em aberto • Prazo de pagamento até 10/${new Date().getMonth() + 1 < 10 ? '0' : ''}${new Date().getMonth() + 1}`}
                     </h4>
                     <p className="text-[11px] text-outline leading-snug">
-                      Regra oficial: Para o próximo mês ({nextMonthName}), o prazo para efetuar o pagamento é <strong>até o dia 10/{String(nextMonthDate.getMonth() + 1).padStart(2, '0')}</strong>.
+                      Regra oficial: Pagamento da mensalidade até o <strong>dia 10 de cada mês</strong>. Quando pago, o botão no app some automaticamente para o mensalista.
                     </p>
                   </div>
                 </div>
@@ -442,7 +454,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                         ? 'Atualizando...'
                         : mensalistasSyncSuccess
                           ? 'Todos Pagos! ✓'
-                          : 'Marcar Mensalistas Pagos'}
+                          : 'Marcar Todos Pagos'}
                     </span>
                   </button>
                 </div>
@@ -468,8 +480,9 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
           <div className="flex flex-col gap-2">
             {filteredPlayers.map(player => {
               const isExempt = checkIsExempt(player);
-              const isPaid = isExempt || (player.playerType === 'mensalista' ? player.monthlyPaid : player.paymentStatus === 'pago');
-              const amount = isExempt ? 0 : (player.playerType === 'mensalista' ? prices.mensalista : prices.avulso);
+              const isPaid = checkIsPlayerPaid(player);
+              const isMensal = player.playerType === 'mensalista';
+              const amount = isExempt ? 0 : (isMensal ? prices.mensalista : prices.avulso);
 
               return (
                 <div 
@@ -485,10 +498,16 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                         {player.name}
                       </h4>
                       <p className="font-body-sm text-body-sm text-outline break-words">
-                        {player.position} • {player.playerType === 'mensalista' ? (
-                          <span className="font-semibold text-emerald-800">
-                            Mensalista • Mês Pago ✓ (Venc. Dia 10)
-                          </span>
+                        {player.position} • {isMensal ? (
+                          isPaid ? (
+                            <span className="font-semibold text-emerald-800">
+                              Mensalista • Mês Pago ✓
+                            </span>
+                          ) : (
+                            <span className="font-semibold text-amber-800">
+                              Mensalista • Aberto (Vencimento até 10/10)
+                            </span>
+                          )
                         ) : 'Avulso'}
                       </p>
                       {player.lastReceiptSummary && isPaid && (

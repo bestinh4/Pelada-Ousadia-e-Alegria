@@ -37,7 +37,7 @@ export interface MensalistaPaymentInfo {
 export function getMensalistaPaymentInfo(player: Player, now = new Date()): MensalistaPaymentInfo {
   const currentKey = getCurrentMonthKey(now);
   const currentDay = now.getDate();
-  const isPaidThisMonth = Boolean(player.monthlyPaid && (player.monthlyPaidMonth === currentKey || !player.monthlyPaidMonth));
+  const isPaidThisMonth = Boolean(player.monthlyPaid && player.monthlyPaidMonth === currentKey);
 
   // Próximo vencimento (dia 10 do próximo mês)
   const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, MENSALISTA_DUE_DAY);

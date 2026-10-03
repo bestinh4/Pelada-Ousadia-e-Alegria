@@ -125,24 +125,32 @@ const Dashboard: React.FC<DashboardProps> = ({
     checkSharedReceipt();
   }, []);
 
-  // Garante que todos os mensalistas estejam marcados como pagos para o mês atual
-  const hasAutoSyncedMensalistasRef = React.useRef(false);
+  // Correção: O mês de outubro ainda não está pago. Reseta os mensalistas para pendente para pagarem até dia 10.
+  const hasResetOctoberMensalistasRef = React.useRef(false);
   useEffect(() => {
-    if (players.length === 0 || hasAutoSyncedMensalistasRef.current) return;
-    hasAutoSyncedMensalistasRef.current = true;
+    if (players.length === 0 || hasResetOctoberMensalistasRef.current) return;
+    const hasAlreadyReset = localStorage.getItem('oa_mensalistas_oct_reset_v2');
+    if (hasAlreadyReset) return;
+    hasResetOctoberMensalistasRef.current = true;
+
     const currentMonthKey = getCurrentMonthKey();
-    const mensalistasToUpdate = players.filter(
-      p => p.playerType === 'mensalista' && (!p.monthlyPaid || p.monthlyPaidMonth !== currentMonthKey)
+    const mensalistasToReset = players.filter(
+      p => p.playerType === 'mensalista' && (p.monthlyPaid || p.monthlyPaidMonth === currentMonthKey)
     );
-    if (mensalistasToUpdate.length > 0) {
+
+    if (mensalistasToReset.length > 0) {
       Promise.all(
-        mensalistasToUpdate.map(p =>
+        mensalistasToReset.map(p =>
           updateDoc(doc(db, "players", p.id), {
-            monthlyPaid: true,
-            monthlyPaidMonth: currentMonthKey
+            monthlyPaid: false,
+            monthlyPaidMonth: null
           }).catch(() => {})
         )
-      ).catch(() => {});
+      ).then(() => {
+        localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
+      }).catch(() => {});
+    } else {
+      localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
     }
   }, [players]);
 
@@ -881,29 +889,57 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                   </div>
 
-                  {(!isGoleiroExempt || hasFineNow) && (
-                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                      <button
-                        type="button"
-                        onClick={() => setIsPixModalOpen(true)}
-                        className={`w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all ${
-                          isPaidNow && !hasFineNow
-                            ? 'bg-white hover:bg-surface-container text-navy-deep border border-emerald-300'
-                            : 'bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25'
-                        }`}
-                      >
-                        <PixIcon
-                          className="w-4 h-4"
-                          color={isPaidNow && !hasFineNow ? '#32BCAD' : '#ffffff'}
-                        />
-                        <span>
-                          {isPaidNow && !hasFineNow
-                            ? 'Ver Pix / Novo Comprovante'
-                            : 'Pagar com Pix / Comprovante'}
-                        </span>
-                      </button>
-                    </div>
-                  )}
+                  {(() => {
+                    // Para o Mensalista: o botão é "Pagar Mensalidade" e SOME quando o pagamento for confirmado
+                    if (isMensal) {
+                      if (isPaidNow && !hasFineNow) {
+                        return null; // Some completamente quando o pagamento for confirmado!
+                      }
+                      return (
+                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => setIsPixModalOpen(true)}
+                            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25"
+                          >
+                            <PixIcon className="w-4 h-4" color="#ffffff" />
+                            <span>{hasFineNow ? 'Pagar Mensalidade + Multa' : 'Pagar Mensalidade'}</span>
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    // Para o Avulso: aparece toda pelada
+                    if (!isGoleiroExempt || hasFineNow) {
+                      return (
+                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => setIsPixModalOpen(true)}
+                            className={`w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all ${
+                              isPaidNow && !hasFineNow
+                                ? 'bg-white hover:bg-surface-container text-navy-deep border border-emerald-300'
+                                : 'bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25'
+                            }`}
+                          >
+                            <PixIcon
+                              className="w-4 h-4"
+                              color={isPaidNow && !hasFineNow ? '#32BCAD' : '#ffffff'}
+                            />
+                            <span>
+                              {isPaidNow && !hasFineNow
+                                ? 'Ver Pix / Novo Comprovante'
+                                : hasFineNow
+                                  ? 'Pagar Pelada + Multa'
+                                  : 'Pagar com Pix / Comprovante'}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
                 </div>
               );
             })()
