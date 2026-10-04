@@ -24,6 +24,26 @@ const TEAM_THEMES = [
   { id: 4, name: 'TIME 5', headerBg: 'bg-emerald-800', badgeBg: 'bg-emerald-100 text-emerald-900', dot: '⭐' },
 ];
 
+// Helper para gerar snapshots leves dos atletas evitando estourar o limite de 1MB do Firestore (base64)
+const buildPlayerSnapshots = (convoked: { player: Player; teamName: string }[]) => {
+  return convoked.map(({ player, teamName }) => ({
+    id: player.id,
+    name: player.name || 'Atleta',
+    position: player.position || 'Linha',
+    // Não incluir imagens em base64 gigantes (data:image) para não estourar o limite de 1MB por documento do Firestore
+    photoUrl: (player.photoUrl && !player.photoUrl.startsWith('data:') && player.photoUrl.length < 500) ? player.photoUrl : '',
+    playerType: player.playerType || 'avulso',
+    teamName: teamName || 'Time'
+  }));
+};
+
+const sanitizeForFirestore = <T extends Record<string, any>>(obj: T): T => {
+  return JSON.parse(JSON.stringify(obj, (_key, value) => {
+    if (value === undefined) return null;
+    return value;
+  }));
+};
+
 const TeamBalancing: React.FC<TeamBalancingProps> = ({ 
   players = [], 
   match,
@@ -752,24 +772,18 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       try {
         const historyId = `history_${session.finishedAt || Date.now()}`;
         const convoked = getConvokedAthletesList(session);
-        const playerSnapshots = convoked.map(({ player, teamName }) => ({
-          id: player.id,
-          name: player.name,
-          position: player.position,
-          photoUrl: player.photoUrl,
-          playerType: player.playerType || 'avulso',
-          teamName
-        }));
+        const playerSnapshots = buildPlayerSnapshots(convoked);
         const finishedIso = session.summary?.finishedAt || new Date(session.finishedAt || Date.now()).toISOString();
-        await setDoc(doc(db, "sessions", historyId), {
+        const historyData = sanitizeForFirestore({
           ...session,
           id: historyId,
           isHistory: true,
           status: "finished",
           matchDate: finishedIso.split('T')[0],
-          location: "Granja Cantinho do Céu",
+          location: session.location || "Granja Cantinho do Céu",
           playerSnapshots
         });
+        await setDoc(doc(db, "sessions", historyId), historyData);
         // Limpar a lista de presença de todos os atletas para a próxima pelada
         await Promise.all(
           players
@@ -783,7 +797,22 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
             )
         );
         if (!isCancelled) {
-          await deleteDoc(doc(db, "sessions", "current"));
+          try {
+            await deleteDoc(doc(db, "sessions", "current"));
+          } catch (delErr) {
+            console.warn("deleteDoc sessions/current falhou:", delErr);
+            await setDoc(doc(db, "sessions", "current"), {
+              id: "current",
+              status: "waiting",
+              teams: [],
+              waitingQueue: [],
+              courtPresence: {},
+              reserves: [],
+              activeMatch: null,
+              matchCount: 0,
+              updatedAt: Date.now()
+            }).catch(() => {});
+          }
           localStorage.removeItem('oa_real_session_cache');
           setSelectedIds(new Set());
           setActiveViewTab('history');
@@ -916,22 +945,15 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         syncedPresence[player.id] = !!presence[player.id];
       });
 
-      const playerSnapshots = convoked.map(({ player, teamName }) => ({
-        id: player.id,
-        name: player.name,
-        position: player.position,
-        photoUrl: player.photoUrl,
-        playerType: player.playerType || 'avulso',
-        teamName
-      }));
+      const playerSnapshots = buildPlayerSnapshots(convoked);
 
-      await setDoc(doc(db, "sessions", historyId), {
+      const historyData = sanitizeForFirestore({
         ...session,
         id: historyId,
         isHistory: true,
         status: "finished",
         matchDate: matchDateStr,
-        location: "Granja Cantinho do Céu",
+        location: session.location || "Granja Cantinho do Céu",
         finishedAt: nowTs,
         activeMatch: null,
         courtPresence: syncedPresence,
@@ -947,8 +969,26 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         }
       });
 
+      await setDoc(doc(db, "sessions", historyId), historyData);
+
       // 5. Remover a sessão ativa atual para deixar o sorteio e a lista 100% limpos
-      await deleteDoc(doc(db, "sessions", "current"));
+      try {
+        await deleteDoc(doc(db, "sessions", "current"));
+      } catch (delErr) {
+        console.warn("deleteDoc sessions/current falhou, limpando dados:", delErr);
+        await setDoc(doc(db, "sessions", "current"), {
+          id: "current",
+          status: "waiting",
+          teams: [],
+          waitingQueue: [],
+          courtPresence: {},
+          reserves: [],
+          activeMatch: null,
+          matchCount: 0,
+          updatedAt: Date.now()
+        }).catch(() => {});
+      }
+
       localStorage.removeItem('oa_real_session_cache');
       setSelectedIds(new Set());
       setActiveViewTab('history');
@@ -963,9 +1003,17 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
           user?.uid
         );
       } catch {}
-    } catch (e) {
-      console.error(e);
-      alert("Erro ao encerrar a pelada.");
+
+      alert(
+        `🏁 PELADA ENCERRADA E LISTA LIMPA COM SUCESSO!\n\n` +
+        `✅ Participaram: ${participatedIds.length} atleta(s)\n` +
+        `❌ Faltas apuradas: ${noShowIds.length} atleta(s)\n` +
+        `🚨 Multados (R$ ${fineAmountValue},00 + Suplência): ${finedIds.length} atleta(s)\n\n` +
+        `A pelada de hoje foi arquivada no Histórico e a lista foi limpa para a próxima convocação!`
+      );
+    } catch (e: any) {
+      console.error("Erro ao encerrar a pelada:", e);
+      alert(`Erro ao encerrar a pelada: ${e?.message || 'Falha de comunicação com o servidor'}`);
     } finally {
       setIsFinishingPelada(false);
     }
@@ -1130,17 +1178,10 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
       await Promise.all([...partPromises, ...noShowPromises, ...cleanOtherPlayersPromises]);
 
-      const playerSnapshots = convoked.map(({ player, teamName }) => ({
-        id: player.id,
-        name: player.name,
-        position: player.position,
-        photoUrl: player.photoUrl,
-        playerType: player.playerType || 'avulso',
-        teamName
-      }));
+      const playerSnapshots = buildPlayerSnapshots(convoked);
 
       // 4. Salvar / Atualizar a pelada no Histórico ('sessions/history_...')
-      await setDoc(doc(db, "sessions", historyId), {
+      const historyData = sanitizeForFirestore({
         ...target,
         id: historyId,
         isHistory: true,
@@ -1162,9 +1203,26 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         }
       });
 
+      await setDoc(doc(db, "sessions", historyId), historyData);
+
       // 5. Se estava encerrando a pelada atual, apagar 'sessions/current' e redirecionar para o Histórico
       if (!isEditingHistory) {
-        await deleteDoc(doc(db, "sessions", "current"));
+        try {
+          await deleteDoc(doc(db, "sessions", "current"));
+        } catch (delErr) {
+          console.warn("deleteDoc sessions/current falhou, limpando documento:", delErr);
+          await setDoc(doc(db, "sessions", "current"), {
+            id: "current",
+            status: "waiting",
+            teams: [],
+            waitingQueue: [],
+            courtPresence: {},
+            reserves: [],
+            activeMatch: null,
+            matchCount: 0,
+            updatedAt: Date.now()
+          }).catch(() => {});
+        }
         localStorage.removeItem('oa_real_session_cache');
         setSelectedIds(new Set());
         setActiveViewTab('history');
@@ -1195,9 +1253,9 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
             (exemptNoShowIds.length > 0 ? `⚖️ Isentos de multa: ${exemptNoShowIds.length} atleta(s)\n` : '') +
             `\nA pelada foi movida para o Histórico e a lista está limpa para a próxima convocação.`
       );
-    } catch (e) {
-      console.error(e);
-      alert("Erro ao salvar dados da pelada.");
+    } catch (e: any) {
+      console.error("Erro ao salvar dados da pelada:", e);
+      alert(`Erro ao salvar dados da pelada: ${e?.message || 'Falha de comunicação com o servidor'}`);
     } finally {
       setIsFinishingPelada(false);
     }

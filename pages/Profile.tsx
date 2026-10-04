@@ -87,47 +87,76 @@ const Profile: React.FC<{
                 onChange={async (e) => {
                   const file = e.target.files?.[0]; if (!file) return;
                   setIsUploading(true);
-                  const reader = new FileReader();
-                  reader.onloadend = async () => {
-                    const photoBase64 = reader.result as string;
-                    try {
-                      const targetId = player.id || currentUser?.uid;
-                      if (!targetId) return;
+                  try {
+                    // Comprimir imagem para max 320x320 JPEG leve (~25KB)
+                    const photoBase64 = await new Promise<string>((resolve, reject) => {
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const img = new Image();
+                        img.onload = () => {
+                          const maxDim = 320;
+                          let w = img.width;
+                          let h = img.height;
+                          if (w > h && w > maxDim) {
+                            h = Math.round((h * maxDim) / w);
+                            w = maxDim;
+                          } else if (h > maxDim) {
+                            w = Math.round((w * maxDim) / h);
+                            h = maxDim;
+                          }
+                          const canvas = document.createElement('canvas');
+                          canvas.width = w;
+                          canvas.height = h;
+                          const ctx = canvas.getContext('2d');
+                          if (!ctx) {
+                            resolve(ev.target?.result as string);
+                            return;
+                          }
+                          ctx.drawImage(img, 0, 0, w, h);
+                          resolve(canvas.toDataURL('image/jpeg', 0.8));
+                        };
+                        img.onerror = () => resolve(ev.target?.result as string);
+                        img.src = ev.target?.result as string;
+                      };
+                      reader.onerror = reject;
+                      reader.readAsDataURL(file);
+                    });
 
-                      await setDoc(doc(db, "players", targetId), { 
+                    const targetId = player.id || currentUser?.uid;
+                    if (!targetId) return;
+
+                    await setDoc(doc(db, "players", targetId), { 
+                      photoUrl: photoBase64,
+                      id: targetId,
+                      updatedAt: new Date().toISOString()
+                    }, { merge: true });
+
+                    if (currentUser?.uid && targetId !== currentUser.uid) {
+                      await setDoc(doc(db, "players", currentUser.uid), { 
                         photoUrl: photoBase64,
-                        id: targetId,
                         updatedAt: new Date().toISOString()
-                      }, { merge: true });
-
-                      if (currentUser?.uid && targetId !== currentUser.uid) {
-                        await setDoc(doc(db, "players", currentUser.uid), { 
-                          photoUrl: photoBase64,
-                          updatedAt: new Date().toISOString()
-                        }, { merge: true }).catch(() => {});
-                      }
-
-                      if (auth.currentUser) {
-                        await updateProfile(auth.currentUser, { photoURL: photoBase64 }).catch(() => {});
-                      }
-
-                      const saved = localStorage.getItem('oa_preview_user');
-                      if (saved) {
-                        try {
-                          const parsed = JSON.parse(saved);
-                          parsed.photoURL = photoBase64;
-                          localStorage.setItem('oa_preview_user', JSON.stringify(parsed));
-                        } catch {}
-                      }
-                      alert("Foto de perfil alterada com sucesso!");
-                    } catch (err) {
-                      console.error("Erro ao salvar foto de perfil:", err);
-                      alert("Erro ao salvar a foto de perfil. Tente novamente.");
-                    } finally {
-                      setIsUploading(false);
+                      }, { merge: true }).catch(() => {});
                     }
-                  };
-                  reader.readAsDataURL(file);
+
+                    if (auth.currentUser) {
+                      await updateProfile(auth.currentUser, { photoURL: photoBase64 }).catch(() => {});
+                    }
+
+                    const saved = localStorage.getItem('oa_preview_user');
+                    if (saved) {
+                      try {
+                        const parsed = JSON.parse(saved);
+                        parsed.photoURL = photoBase64;
+                        localStorage.setItem('oa_preview_user', JSON.stringify(parsed));
+                      } catch {}
+                    }
+                    alert("Foto de perfil alterada com sucesso!");
+                  } catch (err) {
+                    console.error("Erro ao salvar foto de perfil:", err);
+                    alert("Erro ao salvar a foto de perfil. Tente novamente.");
+                  } finally {
+                    setIsUploading(false);
+                  }
                 }} 
               />
             </div>

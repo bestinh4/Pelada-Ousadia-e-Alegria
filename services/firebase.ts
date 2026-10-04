@@ -14,6 +14,7 @@ import {
 } from "firebase/auth";
 import { 
   getFirestore, 
+  initializeFirestore,
   doc, 
   updateDoc, 
   setDoc, 
@@ -47,7 +48,14 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // 2. Inicializar e exportar as instâncias dos serviços vinculadas ao 'app'
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+let firestoreInstance;
+try {
+  firestoreInstance = initializeFirestore(app, { ignoreUndefinedProperties: true });
+} catch {
+  firestoreInstance = getFirestore(app);
+}
+export const db = firestoreInstance;
 
 // 3. Inicializar Messaging com tratamento de erro
 let messagingInstance = null;
