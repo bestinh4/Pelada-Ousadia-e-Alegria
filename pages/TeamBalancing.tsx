@@ -120,8 +120,12 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     localStorage.setItem('oa_auto_promote_punctuality', String(next));
   };
 
-  const isMaster = user?.email === MASTER_ADMIN_EMAIL;
-  const isAdm = currentUserRole === 'admin' || isMaster;
+  const isMaster = !!(user?.email && user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase());
+  const currentAdminPlayer = players.find(p => 
+    p.id === user?.uid || 
+    (user?.email && p.email && p.email.toLowerCase() === user.email.toLowerCase())
+  );
+  const isAdm = isMaster || currentUserRole === 'admin' || currentAdminPlayer?.role === 'admin';
 
   // Hierarquia oficial das posições para ordenação tática dentro de cada equipe:
   // 0: Goleiro | 10-19: Defensores (Zagueiro, Lateral) | 20-29: Meio-Campistas (Volante, Meia, Meia-atacante) | 30-39: Atacantes
@@ -828,195 +832,10 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     };
   }, [session?.status, isAdm]);
 
-  // Encerrar a Pelada AUTOMATICAMENTE com base no Check-in feito em campo (courtPresence),
-  // arquivar no Histórico e LIMPAR A LISTA de atletas para a próxima pelada
-  const handleAutoFinishPeladaFromCheckIn = async () => {
-    if (!session || !isAdm || isFinishingPelada) return;
-
-    const convoked = getConvokedAthletesList(session);
-    const presence = session.courtPresence || {};
-
-    const participatedIds: string[] = [];
-    const noShowIds: string[] = [];
-    const noShowNames: string[] = [];
-
-    convoked.forEach(({ player }) => {
-      // Conferência 100% automática pelo check-in feito em campo (Na Quadra)
-      if (presence[player.id]) {
-        participatedIds.push(player.id);
-      } else {
-        noShowIds.push(player.id);
-        noShowNames.push(player.name);
-      }
-    });
-
-    const confirmMsg =
-      `🏁 ENCERRAR PELADA E LIMPAR LISTA\n\n` +
-      `✅ Participaram (Com Check-in em Campo): ${participatedIds.length} atleta(s)\n` +
-      `❌ Não Compareceram (Sem Check-in em Campo): ${noShowIds.length} atleta(s)\n` +
-      (noShowNames.length > 0
-        ? `\n🚨 Faltosos que serão multados (R$ ${fineAmountValue},00) e entrarão na suplência:\n• ${noShowNames.join('\n• ')}\n`
-        : `\n👏 Todos os convocados fizeram check-in em campo (0 faltas)!\n`) +
-      `\n📋 A lista de presença atual será limpa e esta pelada irá para o Histórico (onde a Diretoria poderá consultá-la ou fazer alterações).\n\nConfirma o encerramento oficial?`;
-
-    if (!confirm(confirmMsg)) return;
-
-    setIsFinishingPelada(true);
-    try {
-      const finedIds = [...noShowIds];
-      const exemptNoShowIds: string[] = [];
-      const nowTs = Date.now();
-      const nowIso = new Date(nowTs).toISOString();
-      const matchDateStr = session.matchDate || match?.date || nowIso.split('T')[0];
-      const historyId = `history_${nowTs}`;
-
-      const convokedIdSet = new Set<string>();
-
-      // 1. Atualizar os atletas que PARTICIPARAM (fizeram check-in em campo) + limpar status para 'pendente'
-      const partPromises = participatedIds.map(async (pid) => {
-        convokedIdSet.add(pid);
-        const p = players.find(x => x.id === pid);
-        if (!p) return;
-        const playerTeam = session.teams.find(t => t.playerIds.includes(pid));
-        const teamWins = playerTeam?.totalWins || 0;
-
-        const updates: Record<string, any> = {
-          status: 'pendente',
-          confirmedAt: null,
-          courtCheckIn: false,
-          hasNoShowFine: false,
-          suplenteNextMatch: false,
-          lastParticipatedAt: nowIso,
-          totalGames: (p.totalGames || 0) + 1,
-          totalWins: (p.totalWins || 0) + teamWins
-        };
-
-        await updateDoc(doc(db, "players", pid), updates).catch(() => {});
-      });
-
-      // 2. Atualizar os atletas que NÃO FIZERAM CHECK-IN EM CAMPO (Faltosos -> Multa + Suplente) + limpar status para 'pendente'
-      const noShowPromises = noShowIds.map(async (pid) => {
-        convokedIdSet.add(pid);
-        const p = players.find(x => x.id === pid);
-        if (!p) return;
-
-        const updates: Record<string, any> = {
-          status: 'pendente',
-          confirmedAt: null,
-          courtCheckIn: false,
-          suplenteNextMatch: true,
-          hasNoShowFine: true,
-          hasLateRemovalFine: true,
-          fineAmount: fineAmountValue,
-          fineReason: 'Colocou o nome na lista e não fez check-in em campo (Falta / W.O.)'
-        };
-
-        await updateDoc(doc(db, "players", pid), updates).catch(() => {});
-
-        await addDoc(collection(db, "lateRemovals"), {
-          playerId: pid,
-          playerName: p.name || "Atleta",
-          timestamp: nowIso,
-          matchId: historyId,
-          matchLocation: "Granja Cantinho do Céu",
-          matchDate: matchDateStr,
-          status: 'pendente',
-          fineAmount: fineAmountValue,
-          reason: 'Colocou o nome na lista e não fez check-in em campo (Falta / W.O.)'
-        }).catch(() => {});
-      });
-
-      // 3. Limpar o status de qualquer outro atleta na lista que estava como 'presente' ou 'ausente'
-      const cleanOtherPlayersPromises = players
-        .filter(p => !convokedIdSet.has(p.id) && (p.status !== 'pendente' || p.confirmedAt || p.courtCheckIn))
-        .map(p =>
-          updateDoc(doc(db, "players", p.id), {
-            status: 'pendente',
-            confirmedAt: null,
-            courtCheckIn: false
-          }).catch(() => {})
-        );
-
-      await Promise.all([...partPromises, ...noShowPromises, ...cleanOtherPlayersPromises]);
-
-      // 4. Arquivar a pelada encerrada no Histórico ('sessions/history_...')
-      const syncedPresence: Record<string, boolean> = {};
-      convoked.forEach(({ player }) => {
-        syncedPresence[player.id] = !!presence[player.id];
-      });
-
-      const playerSnapshots = buildPlayerSnapshots(convoked);
-
-      const historyData = sanitizeForFirestore({
-        ...session,
-        id: historyId,
-        isHistory: true,
-        status: "finished",
-        matchDate: matchDateStr,
-        location: session.location || "Granja Cantinho do Céu",
-        finishedAt: nowTs,
-        activeMatch: null,
-        courtPresence: syncedPresence,
-        playerSnapshots,
-        summary: {
-          participatedIds,
-          noShowIds,
-          finedIds,
-          exemptNoShowIds,
-          fineAmount: fineAmountValue,
-          totalMatches: session.matchCount || 1,
-          finishedAt: nowIso
-        }
-      });
-
-      await setDoc(doc(db, "sessions", historyId), historyData);
-
-      // 5. Remover a sessão ativa atual para deixar o sorteio e a lista 100% limpos
-      try {
-        await deleteDoc(doc(db, "sessions", "current"));
-      } catch (delErr) {
-        console.warn("deleteDoc sessions/current falhou, limpando dados:", delErr);
-        await setDoc(doc(db, "sessions", "current"), {
-          id: "current",
-          status: "waiting",
-          teams: [],
-          waitingQueue: [],
-          courtPresence: {},
-          reserves: [],
-          activeMatch: null,
-          matchCount: 0,
-          updatedAt: Date.now()
-        }).catch(() => {});
-      }
-
-      localStorage.removeItem('oa_real_session_cache');
-      setSelectedIds(new Set());
-      setActiveViewTab('history');
-      setExpandedHistoryId(historyId);
-
-      playSound('cheer');
-
-      try {
-        await broadcastNotification(
-          "🏁 PELADA ENCERRADA!",
-          `Pelada arquivada no histórico e lista limpa! (${participatedIds.length} participaram · ${finedIds.length} falta(s) com multa).`,
-          user?.uid
-        );
-      } catch {}
-
-      alert(
-        `🏁 PELADA ENCERRADA E LISTA LIMPA COM SUCESSO!\n\n` +
-        `✅ Participaram: ${participatedIds.length} atleta(s)\n` +
-        `❌ Faltas apuradas: ${noShowIds.length} atleta(s)\n` +
-        `🚨 Multados (R$ ${fineAmountValue},00 + Suplência): ${finedIds.length} atleta(s)\n\n` +
-        `A pelada de hoje foi arquivada no Histórico e a lista foi limpa para a próxima convocação!`
-      );
-    } catch (e: any) {
-      console.error("Erro ao encerrar a pelada:", e);
-      alert(`Erro ao encerrar a pelada: ${e?.message || 'Falha de comunicação com o servidor'}`);
-    } finally {
-      setIsFinishingPelada(false);
-    }
+  // Encerrar a Pelada: abre o Modal Oficial de Conferência com apuração automática de presença, faltas e multas
+  const handleAutoFinishPeladaFromCheckIn = () => {
+    if (!session || !isAdm) return;
+    handleOpenFinishModal();
   };
 
   // Abrir o Modal Oficial de Revisão/Ajuste (para a pelada atual OU para uma pelada do histórico)
@@ -1034,8 +853,9 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       const partSet = new Set(target.summary.participatedIds || []);
       const exemptSet = new Set(target.summary.exemptNoShowIds || []);
       convoked.forEach(({ player }) => {
-        initialAtt[player.id] = partSet.has(player.id);
-        initialFined[player.id] = !exemptSet.has(player.id);
+        const participated = partSet.has(player.id);
+        initialAtt[player.id] = participated;
+        initialFined[player.id] = !participated && !exemptSet.has(player.id);
       });
       if (target.summary.fineAmount !== undefined) {
         setFineAmountValue(target.summary.fineAmount);
@@ -1043,8 +863,20 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     } else {
       const presence = target.courtPresence || {};
       convoked.forEach(({ player }) => {
-        initialAtt[player.id] = !!presence[player.id];
-        initialFined[player.id] = true;
+        const attended = !!presence[player.id];
+        initialAtt[player.id] = attended;
+        if (!attended) {
+          // Regra Oficial de Multas:
+          // Multar APENAS o atleta que confirmou o nome na lista e não compareceu.
+          // Se o atleta retirou o nome da lista antes das 18h (status 'ausente' sem multa tardia)
+          // ou não colocou o nome na lista (status 'pendente' sem confirmedAt e sem multa tardia):
+          // O mesmo NÃO deverá ser multado (Isento)!
+          const isExempt = (player.status === 'ausente' && !player.hasLateRemovalFine) ||
+                           (player.status === 'pendente' && !player.confirmedAt && !player.hasLateRemovalFine);
+          initialFined[player.id] = !isExempt;
+        } else {
+          initialFined[player.id] = false;
+        }
       });
     }
 
@@ -1182,14 +1014,28 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
       // 4. Salvar / Atualizar a pelada no Histórico ('sessions/history_...')
       const historyData = sanitizeForFirestore({
-        ...target,
         id: historyId,
         isHistory: true,
         status: "finished",
         matchDate: matchDateStr,
         location: target.location || "Granja Cantinho do Céu",
+        createdAt: target.createdAt || nowTs,
         finishedAt: target.finishedAt || nowTs,
+        drawDate: target.drawDate || null,
+        peladaStartedAt: target.peladaStartedAt || null,
+        teams: (target.teams || []).map(t => ({
+          id: t.id,
+          name: t.name,
+          playerIds: t.playerIds || [],
+          totalWins: t.totalWins || 0,
+          consecutiveWins: t.consecutiveWins || 0,
+          hasGoalkeeper: !!t.hasGoalkeeper,
+          isIncomplete: !!t.isIncomplete
+        })),
+        waitingQueue: target.waitingQueue || [],
+        reserves: target.reserves || [],
         activeMatch: null,
+        matchCount: target.summary?.totalMatches || target.matchCount || 1,
         courtPresence: attendanceMap,
         playerSnapshots,
         summary: {
@@ -1205,24 +1051,26 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
       await setDoc(doc(db, "sessions", historyId), historyData);
 
-      // 5. Se estava encerrando a pelada atual, apagar 'sessions/current' e redirecionar para o Histórico
+      // 5. Se estava encerrando a pelada atual, resetar 'sessions/current' e redirecionar para o Histórico
       if (!isEditingHistory) {
+        await setDoc(doc(db, "sessions", "current"), {
+          id: "current",
+          status: "waiting",
+          teams: [],
+          waitingQueue: [],
+          courtPresence: {},
+          reserves: [],
+          activeMatch: null,
+          matchCount: 0,
+          updatedAt: Date.now()
+        }).catch(() => {});
+
         try {
           await deleteDoc(doc(db, "sessions", "current"));
         } catch (delErr) {
-          console.warn("deleteDoc sessions/current falhou, limpando documento:", delErr);
-          await setDoc(doc(db, "sessions", "current"), {
-            id: "current",
-            status: "waiting",
-            teams: [],
-            waitingQueue: [],
-            courtPresence: {},
-            reserves: [],
-            activeMatch: null,
-            matchCount: 0,
-            updatedAt: Date.now()
-          }).catch(() => {});
+          console.warn("deleteDoc sessions/current falhou, documento foi resetado:", delErr);
         }
+
         localStorage.removeItem('oa_real_session_cache');
         setSelectedIds(new Set());
         setActiveViewTab('history');
@@ -3361,7 +3209,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
               return (
                 <>
                   {/* Resumo Ao Vivo da Conferência */}
-                  <div className="grid grid-cols-3 gap-2 shrink-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
                     <div className="p-2 rounded-xl bg-emerald-50 border border-emerald-200 text-center">
                       <span className="font-scoreboard-num text-lg sm:text-2xl text-emerald-700 leading-none block">
                         {presentCount}
@@ -3371,12 +3219,12 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                       </span>
                     </div>
 
-                    <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-center">
-                      <span className="font-scoreboard-num text-lg sm:text-2xl text-amber-700 leading-none block">
+                    <div className="p-2 rounded-xl bg-slate-50 border border-slate-200 text-center">
+                      <span className="font-scoreboard-num text-lg sm:text-2xl text-slate-700 leading-none block">
                         {absentCount}
                       </span>
-                      <span className="text-[9px] sm:text-[10px] font-bold uppercase text-amber-900">
-                        ❌ Faltaram
+                      <span className="text-[9px] sm:text-[10px] font-bold uppercase text-slate-900">
+                        ❌ Não Foram
                       </span>
                     </div>
 
@@ -3386,6 +3234,15 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                       </span>
                       <span className="text-[9px] sm:text-[10px] font-bold uppercase text-red-900">
                         🚨 Multados
+                      </span>
+                    </div>
+
+                    <div className="p-2 rounded-xl bg-amber-50 border border-amber-200 text-center">
+                      <span className="font-scoreboard-num text-lg sm:text-2xl text-amber-700 leading-none block">
+                        {Math.max(0, absentCount - finedCount)}
+                      </span>
+                      <span className="text-[9px] sm:text-[10px] font-bold uppercase text-amber-900">
+                        ⚖️ Isentos
                       </span>
                     </div>
                   </div>
@@ -3476,6 +3333,19 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                                 <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-surface-container text-navy-deep">
                                   {player.playerType === 'mensalista' ? 'Mensalista' : 'Avulso'}
                                 </span>
+                                {!attended && (
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                    willFine 
+                                      ? 'bg-red-100 text-red-800' 
+                                      : 'bg-amber-100 text-amber-900'
+                                  }`}>
+                                    {willFine 
+                                      ? '🚨 Confirmou e faltou (Multa)' 
+                                      : player.status === 'ausente' 
+                                        ? '⚖️ Retirou antes das 18h (Isento)' 
+                                        : '⚖️ Não confirmou na lista (Isento)'}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
