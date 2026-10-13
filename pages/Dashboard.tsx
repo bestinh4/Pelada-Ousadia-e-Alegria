@@ -8,7 +8,7 @@ import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
 import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
 import { getCurrentMonthKey, getMonthName, getMensalistaPaymentInfo, MENSALISTA_DUE_DAY } from '../utils/mensalistaUtils.ts';
-import { playSound } from '../utils/sound.ts';
+import { playSound, playWhistleSound } from '../utils/sound.ts';
 
 interface DashboardProps {
   match: Match | null;
@@ -251,6 +251,13 @@ const Dashboard: React.FC<DashboardProps> = ({
           updates.hasLateRemovalFine = true;
           updates.fineAmount = prices.multa || 20;
           updates.suplenteNextMatch = true;
+        } else {
+          // Retirou ANTES das 18h: 100% ISENTO! Limpa multas e pendências de falta
+          updates.hasLateRemovalFine = false;
+          updates.hasNoShowFine = false;
+          updates.fineAmount = 0;
+          updates.fineReason = null;
+          updates.suplenteNextMatch = false;
         }
       }
 
@@ -382,12 +389,15 @@ const Dashboard: React.FC<DashboardProps> = ({
         await deleteDoc(doc(db, "sessions", "current")).catch(() => {});
         localStorage.removeItem('oa_real_session_cache');
 
-        // Disparar notificação oficial com a nova data
+        // Disparar notificação oficial com a nova data e apito inicial
         try {
+          playWhistleSound('start');
           await broadcastNotification(
             "⚽ NOVA PELADA ABERTA!",
             `Lista liberada para ${formattedDateBr} às ${cleanTime} (${cleanLocation})! Confirme sua vaga na lista pelo App.`,
-            user?.uid
+            user?.uid,
+            'all',
+            'start'
           );
         } catch {}
 
@@ -633,6 +643,61 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* BARRA DE NOTIFICAÇÕES E APITO DO JUIZ NO CELULAR / PC */}
+      <div className="w-full rounded-2xl bg-gradient-to-r from-blue-900 via-navy-deep to-slate-900 text-white p-3 sm:p-4 shadow-sm border border-blue-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-blue-600/30 border border-blue-400/30 text-amber-300 flex items-center justify-center shrink-0 shadow-inner">
+            <span className="material-symbols-outlined text-[24px]">sports</span>
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-white">
+                Notificações & Apito do Juiz
+              </h4>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                getNotificationStatus() === 'granted'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+              }`}>
+                {getNotificationStatus() === 'granted' ? '🔔 Ativo no Celular' : '⚠️ Toque para Ativar'}
+              </span>
+            </div>
+            <p className="text-[11px] text-blue-200/80 leading-snug truncate">
+              Receba o apito ao abrir a lista, sortear equipes, iniciar e encerrar a pelada.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <button
+            type="button"
+            onClick={() => playWhistleSound('double')}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/20 font-label-md text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all shadow-xs"
+            title="Tocar som oficial do apito de arbitragem via Web Audio"
+          >
+            <span className="material-symbols-outlined text-[16px] text-amber-300">volume_up</span>
+            <span>Testar Apito 🔊</span>
+          </button>
+
+          {getNotificationStatus() !== 'granted' && (
+            <button
+              type="button"
+              onClick={async () => {
+                const ok = await requestNotificationPermission(user?.uid);
+                if (ok) {
+                  playWhistleSound('double');
+                  alert("🔔 Notificações ativadas! O apito do juiz tocará no seu celular e no PC.");
+                }
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-950 font-label-md text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all shadow-sm"
+            >
+              <span className="material-symbols-outlined text-[16px]">notifications_active</span>
+              <span>Ativar no Celular</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* CARD PRINCIPAL DA PELADA & CONFIRMAÇÃO DE PRESENÇA */}
       <div className="relative w-full rounded-2xl bg-surface-container-lowest p-4 sm:p-5 shadow-[0_12px_36px_rgba(0,58,117,0.06)] overflow-hidden border border-surface-container-high/40">

@@ -1,5 +1,6 @@
 
 import { db, doc, updateDoc, collection, addDoc, messaging, getToken, onMessage } from './firebase.ts';
+import { playWhistleSound, WhistlePattern } from '../utils/sound.ts';
 
 const VAPID_KEY = "BHT6LWPFyDCj0inYpPKEXBh3rXptm3alhFnLQFcVmPZVscVKdEfz-3-JalE_Fjx8V538kqR46EJ6w4o1JatMins"; // Chave pública VAPID do console Firebase
 
@@ -20,30 +21,33 @@ export const requestNotificationPermission = async (userId?: string) => {
     console.log('🔔 Status da permissão:', permission);
     
     if (permission === 'denied') {
-      alert("As notificações foram bloqueadas. Para recebê-las, você precisa resetar as permissões no cadeado da barra de endereços do seu navegador.");
+      alert("As notificações foram bloqueadas. Para recebê-las no celular ou PC, toque no cadeado ou ícone de configurações ao lado do endereço do site e permita as notificações.");
     }
     
-    if (permission === 'granted' && userId) {
-      const userRef = doc(db, "players", userId);
-      await updateDoc(userRef, { pushEnabled: true });
-      
-      // Obter Token FCM para notificações em background
-      if (messaging) {
-        try {
-          // Obter a instância do Service Worker já registrado em index.tsx
-          const registration = await navigator.serviceWorker.ready;
-          
-          const token = await getToken(messaging, { 
-            vapidKey: VAPID_KEY,
-            serviceWorkerRegistration: registration
-          });
-          
-          if (token) {
-            console.log("✅ Token FCM obtido:", token);
-            await updateDoc(userRef, { fcmToken: token });
+    if (permission === 'granted') {
+      // Tocar apito de teste para confirmar que o áudio e permissão estão 100% ativos
+      playWhistleSound('double');
+
+      if (userId) {
+        const userRef = doc(db, "players", userId);
+        await updateDoc(userRef, { pushEnabled: true }).catch(() => {});
+        
+        // Obter Token FCM para notificações em background
+        if (messaging) {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+            const token = await getToken(messaging, { 
+              vapidKey: VAPID_KEY,
+              serviceWorkerRegistration: registration
+            });
+            
+            if (token) {
+              console.log("✅ Token FCM obtido:", token);
+              await updateDoc(userRef, { fcmToken: token }).catch(() => {});
+            }
+          } catch (err) {
+            console.error("❌ Erro ao obter token FCM:", err);
           }
-        } catch (err) {
-          console.error("❌ Erro ao obter token FCM:", err);
         }
       }
     }
@@ -59,7 +63,7 @@ export const setupForegroundNotifications = () => {
     onMessage(messaging, (payload) => {
       console.log('📥 Notificação em foreground recebida:', payload);
       if (payload.notification) {
-        sendPushNotification(payload.notification.title || 'O&A', payload.notification.body || '');
+        sendPushNotification(payload.notification.title || 'O&A', payload.notification.body || '', 'single');
       }
     });
   }
@@ -69,24 +73,29 @@ export const broadcastNotification = async (
   title: string,
   body: string,
   senderId?: string,
-  targetStatus: 'all' | 'pendente' = 'all'
+  targetStatus: 'all' | 'pendente' = 'all',
+  soundPattern: WhistlePattern = 'single'
 ) => {
   try {
-    // 1. Salvar no Firestore (para histórico e entrega em tempo real filtrada por targetStatus)
+    // 1. Tocar som de apito localmente imediatamente para o usuário atual
+    playWhistleSound(soundPattern);
+
+    // 2. Salvar no Firestore (para histórico e entrega em tempo real para todos os celulares e computadores)
     await addDoc(collection(db, "notifications"), {
       title,
       body,
       createdAt: new Date().toISOString(),
       type: targetStatus === 'pendente' ? 'pending_reminder' : 'broadcast',
       targetStatus,
+      soundPattern,
       senderId: senderId || null
     });
 
-    // 2. Chamar a API para disparo imediato via FCM (compatível com Express e Vercel)
+    // 3. Chamar a API para disparo imediato via FCM (se configurado)
     await fetch('/api/send-notification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, body, url: '/', targetStatus })
+      body: JSON.stringify({ title, body, url: '/', targetStatus, soundPattern })
     }).catch(() => {});
 
   } catch (error) {
@@ -107,59 +116,60 @@ export const sendPendingAthletesReminder = async (
   const location = match?.location || 'Granja Cantinho do Céu';
   const title = isAutomaticEve
     ? '⏰ VÉSPERA DA PELADA • CONFIRME SUA PRESENÇA!'
-    : '⚽ VOCÊ AINDA ESTÁ PENDENTE NA LISTA!';
+    : '⚽ VOCÊ AINDA NÃO COLOCOU O NOME NA LISTA!';
   const body = isAutomaticEve
-    ? `Amanhã tem pelada às ${matchTime} (${location}) e seu nome ainda está PENDENTE! Toque para confirmar presença até as 18h.`
-    : `Seu status ainda consta como PENDENTE para a pelada (${location} às ${matchTime}). Acesse o app e confirme sua vaga!`;
+    ? `Amanhã tem pelada às ${matchTime} (${location}) e seu nome ainda não foi confirmado! Toque para colocar seu nome antes das 18h.`
+    : `Seu status ainda consta como PENDENTE na pelada (${location} às ${matchTime}). Acesse o App agora e confirme sua vaga na lista!`;
 
-  await broadcastNotification(title, body, senderId, 'pendente');
+  await broadcastNotification(title, body, senderId, 'pendente', 'single');
 };
 
-export const sendPushNotification = async (title: string, body: string) => {
+export const sendPushNotification = async (
+  title: string, 
+  body: string, 
+  soundPattern: WhistlePattern = 'single'
+) => {
+  // Sempre tocar o apito do juiz sintetizado via Web Audio API
+  playWhistleSound(soundPattern);
+
   if (!('Notification' in window)) {
     console.error("❌ Notificações não são suportadas neste navegador.");
     return;
   }
   
-  console.log("🔔 Estado da permissão:", Notification.permission);
-
-  if (Notification.permission === 'denied') {
-    console.warn("🚫 Permissão de notificação negada. O usuário precisa resetar as permissões no navegador.");
-    return;
-  }
-
   if (Notification.permission !== 'granted') {
-    console.warn("🚫 Notificações não permitidas. O sistema só pode solicitar permissão via clique do usuário.");
+    console.warn("🚫 Notificações não permitidas pelo usuário.");
     return;
   }
 
   try {
-    console.log("🔔 Disparando notificação:", title);
-    
-    // Trigger mobile physical vibration if supported
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try {
-        navigator.vibrate([200, 100, 200]);
-      } catch {}
-    }
+    const vibratePattern = soundPattern === 'triple' 
+      ? [200, 100, 200, 100, 450]
+      : soundPattern === 'double'
+        ? [200, 100, 250]
+        : soundPattern === 'start'
+          ? [500]
+          : [200];
 
     const options = {
       body,
       icon: '/pwa-192x192.png',
       badge: '/pwa-192x192.png',
-      vibrate: [200, 100, 200, 100, 200],
+      vibrate: vibratePattern,
       tag: 'oa-notification-' + Date.now(),
       renotify: true,
       requireInteraction: true,
       data: { url: window.location.origin }
     };
 
-    // Tenta usar o Service Worker primeiro (melhor suporte para background e sistema)
+    // Tenta usar o Service Worker primeiro (melhor suporte no celular / Android)
     if ('serviceWorker' in navigator) {
       try {
-        const registration = await navigator.serviceWorker.ready;
+        const swReadyPromise = navigator.serviceWorker.ready;
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000));
+        const registration = await Promise.race([swReadyPromise, timeoutPromise]);
+        
         if (registration && registration.showNotification) {
-          console.log("✅ Enviando via Service Worker");
           await registration.showNotification(title, options as any);
           return;
         }
@@ -169,7 +179,6 @@ export const sendPushNotification = async (title: string, body: string) => {
     }
     
     // Fallback para o objeto Notification padrão
-    console.log("⚠️ Usando fallback de Notificação padrão");
     const notif = new Notification(title, { 
       body: options.body, 
       icon: options.icon,

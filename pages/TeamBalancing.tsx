@@ -6,7 +6,7 @@ import { db, doc, setDoc, onSnapshot, deleteDoc, updateDoc, collection, addDoc }
 import { motion, AnimatePresence } from 'motion/react';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
 import { broadcastNotification } from '../services/notificationService.ts';
-import { playSound } from '../utils/sound.ts';
+import { playSound, playWhistleSound } from '../utils/sound.ts';
 
 interface TeamBalancingProps {
   players: Player[];
@@ -382,14 +382,16 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
     try {
       await setDoc(doc(db, "sessions", "current"), newSession);
-      playSound('cheer');
+      playWhistleSound('double');
 
-      // Notificar todos os participantes
+      // Notificar todos os participantes com apito duplo de sorteio
       try {
         await broadcastNotification(
           "⚽ 5 EQUIPES SORTEADAS!",
-          "A Diretoria realizou o sorteio oficial das 5 equipes com 4 goleiros distribuídos! Veja a escalação no App.",
-          user?.uid
+          "A Diretoria realizou o sorteio oficial das 5 equipes com 4 goleiros distribuídos! Confira a escalação completa no App.",
+          user?.uid,
+          'all',
+          'double'
         );
       } catch {}
 
@@ -680,7 +682,18 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         "activeMatch.startedAt": Date.now(),
         matchCount: 1
       });
-      playSound('cheer');
+      playWhistleSound('start');
+
+      try {
+        await broadcastNotification(
+          "⏱️ APITO INICIAL • A PELADA COMEÇOU!",
+          "A bola está rolando na quadra! Os primeiros confrontos foram iniciados com rodízio oficial.",
+          user?.uid,
+          'all',
+          'start'
+        );
+      } catch {}
+
       alert("⚽ A PELADA COMEÇOU! Apito inicial dado.\n\nA regra de pontualidade foi desativada e a partir de agora o rodízio segue rigorosamente os resultados dos jogos.");
     } catch (e) {
       alert("Erro ao iniciar a pelada.");
@@ -866,13 +879,16 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         const attended = !!presence[player.id];
         initialAtt[player.id] = attended;
         if (!attended) {
-          // Regra Oficial de Multas:
-          // Multar APENAS o atleta que confirmou o nome na lista e não compareceu.
-          // Se o atleta retirou o nome da lista antes das 18h (status 'ausente' sem multa tardia)
-          // ou não colocou o nome na lista (status 'pendente' sem confirmedAt e sem multa tardia):
-          // O mesmo NÃO deverá ser multado (Isento)!
-          const isExempt = (player.status === 'ausente' && !player.hasLateRemovalFine) ||
-                           (player.status === 'pendente' && !player.confirmedAt && !player.hasLateRemovalFine);
+          // REGRA OFICIAL DE MULTAS:
+          // Multar APENAS o atleta que colocou/confirmou o nome na lista e não compareceu à pelada.
+          // Se o atleta retirou o nome da lista antes das 18h da véspera OU não colocou o nome na lista:
+          // O mesmo NÃO deverá ser multado (100% Isento)!
+          const didActivelyConfirm = player.status === 'presente' || (!!player.confirmedAt && player.status !== 'ausente');
+          const didWithdrawBefore18h = player.status === 'ausente';
+          const didNotPutNameOnList = player.status === 'pendente' || !player.confirmedAt;
+
+          // É Isento se: retirou o nome antes das 18h, nunca colocou o nome na lista, ou não está confirmado
+          const isExempt = didWithdrawBefore18h || didNotPutNameOnList || !didActivelyConfirm;
           initialFined[player.id] = !isExempt;
         } else {
           initialFined[player.id] = false;
@@ -1077,7 +1093,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         setExpandedHistoryId(historyId);
       }
 
-      playSound('cheer');
+      playWhistleSound('triple');
       setIsFinishModalOpen(false);
       setEditingHistorySession(null);
 
@@ -1085,8 +1101,10 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         try {
           await broadcastNotification(
             "🏁 PELADA ENCERRADA!",
-            `Pelada arquivada no histórico e lista limpa! ${participatedIds.length} atletas participaram e ${finedIds.length} falta(s) com multa.`,
-            user?.uid
+            `Pelada arquivada no histórico e lista limpa para a próxima! ${participatedIds.length} atletas participaram e ${finedIds.length} falta(s) com multa.`,
+            user?.uid,
+            'all',
+            'triple'
           );
         } catch {}
       }
@@ -3275,7 +3293,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                           });
                           setAttendanceMap(next);
                         }}
-                        className="flex-1 sm:flex-initial px-2.5 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[11px] font-bold transition-all text-center"
+                        className="px-2.5 py-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[11px] font-bold transition-all text-center"
                       >
                         Todos Presentes
                       </button>
@@ -3290,10 +3308,48 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                           });
                           setAttendanceMap(next);
                         }}
-                        className="flex-1 sm:flex-initial px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-navy-deep text-[11px] font-bold transition-all text-center"
+                        className="px-2.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-navy-deep text-[11px] font-bold transition-all text-center"
                         title="Usar exatamente quem marcou 'Na Quadra' durante a pelada"
                       >
                         Sincronizar Check-in
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextFined: Record<string, boolean> = {};
+                          convokedList.forEach(({ player }) => {
+                            nextFined[player.id] = false;
+                          });
+                          setFinedMap(nextFined);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 text-[11px] font-bold transition-all text-center"
+                        title="Isentar todos os atletas faltosos de multas nesta pelada"
+                      >
+                        Isentar Faltosos
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextFined: Record<string, boolean> = {};
+                          convokedList.forEach(({ player }) => {
+                            const attended = !!attendanceMap[player.id];
+                            if (attended) {
+                              nextFined[player.id] = false;
+                            } else {
+                              const didActivelyConfirm = player.status === 'presente' || (!!player.confirmedAt && player.status !== 'ausente');
+                              const didWithdrawBefore18h = player.status === 'ausente';
+                              const didNotPutNameOnList = player.status === 'pendente' || !player.confirmedAt;
+                              nextFined[player.id] = !(didWithdrawBefore18h || didNotPutNameOnList || !didActivelyConfirm);
+                            }
+                          });
+                          setFinedMap(nextFined);
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-900 text-[11px] font-bold transition-all text-center"
+                        title="Aplicar regra oficial: multar apenas quem confirmou na lista e não compareceu; quem retirou antes das 18h ou não colocou é isento"
+                      >
+                        Regra Oficial
                       </button>
                     </div>
                   </div>

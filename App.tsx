@@ -18,7 +18,7 @@ import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from './constants.tsx';
 import { auth, db, loginWithGoogle, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, setDoc, getDocs, limit, where } from './services/firebase.ts';
 import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications, sendPendingAthletesReminder } from './services/notificationService.ts';
 import { checkMatchEveInfo } from './utils/timeUtils.ts';
-import { playSound } from './utils/sound.ts';
+import { playSound, playWhistleSound, WhistlePattern } from './utils/sound.ts';
 
 const VALID_PAGES = new Set<string>(Object.values(Page));
 
@@ -303,25 +303,37 @@ const App: React.FC = () => {
       }
     });
 
-    // Listener para transmissões de notificações (Broadcasts)
-    // Usamos um pequeno atraso para garantir que não percamos notificações por diferença de relógio
-    const startTime = new Date(Date.now() - 30000).toISOString(); 
+    // Listener para transmissões de notificações (Broadcasts) com suporte a mobile e PC
     const qBroadcasts = query(
       collection(db, "notifications"), 
-      where("createdAt", ">", startTime),
       orderBy("createdAt", "desc"),
       limit(10)
     );
     
+    let isInitialBroadcastSync = true;
+    const seenNotifIds = new Set<string>();
+    try {
+      const stored = localStorage.getItem('oa_seen_notifications');
+      if (stored) {
+        JSON.parse(stored).forEach((id: string) => seenNotifIds.add(id));
+      }
+    } catch {}
+
     const unsubscribeBroadcasts = onSnapshot(qBroadcasts, (snapshot) => {
+      const newDocsToProcess: any[] = [];
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
+          const docId = change.doc.id;
           const data = change.doc.data();
           
+          // Se já vimos este documento no aparelho, não reprocessar
+          if (seenNotifIds.has(docId)) return;
+          seenNotifIds.add(docId);
+
           // Evitar notificar o próprio remetente
           if (data.senderId === user.uid) return;
 
-          // Se a notificação for exclusiva para atletas pendentes, verificar o status do atleta logado
+          // Se a notificação for exclusiva para atletas pendentes, verificar status
           if (data.targetStatus === 'pendente') {
             const myPlayer = prevPlayersState.current[user.uid] || Object.values(prevPlayersState.current).find(
               p => user.email && p.email && p.email.toLowerCase() === user.email.toLowerCase()
@@ -330,12 +342,35 @@ const App: React.FC = () => {
             if (myStatus !== 'pendente') return;
           }
 
-          playSound('cheer');
-          sendPushNotification(data.title, data.body);
-          addInAppNotification(data.title, data.body, 'info');
+          // Se for sync inicial, exibir se enviada nas últimas 24 horas e ainda não lida
+          if (isInitialBroadcastSync) {
+            const createdMs = data.createdAt ? new Date(data.createdAt).getTime() : 0;
+            const diffHours = (Date.now() - createdMs) / (1000 * 60 * 60);
+            if (diffHours < 24) {
+              newDocsToProcess.push({ ...data, id: docId });
+            }
+          } else {
+            // Em tempo real (nova notificação gerada agora)
+            newDocsToProcess.push({ ...data, id: docId });
+          }
         }
       });
-    }, () => {});
+
+      isInitialBroadcastSync = false;
+      try {
+        localStorage.setItem('oa_seen_notifications', JSON.stringify(Array.from(seenNotifIds).slice(-50)));
+      } catch {}
+
+      if (newDocsToProcess.length > 0) {
+        const latest = newDocsToProcess[0];
+        const sound = (latest.soundPattern as WhistlePattern) || 'single';
+        playWhistleSound(sound);
+        sendPushNotification(latest.title, latest.body, sound);
+        addInAppNotification(latest.title, latest.body, 'info');
+      }
+    }, (err) => {
+      console.warn("Aviso ao sincronizar notificações:", err);
+    });
 
     return () => {
       unsubscribePlayers();
