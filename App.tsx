@@ -16,7 +16,7 @@ import { MaintenanceScreen } from './components/MaintenanceScreen.tsx';
 import { Page, Player, Match } from './types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from './constants.tsx';
 import { auth, db, loginWithGoogle, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, setDoc, getDocs, limit, where } from './services/firebase.ts';
-import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications, sendPendingAthletesReminder } from './services/notificationService.ts';
+import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications, sendPendingAthletesReminder, syncPushSubscription } from './services/notificationService.ts';
 import { checkMatchEveInfo } from './utils/timeUtils.ts';
 import { playSound, playWhistleSound, WhistlePattern } from './utils/sound.ts';
 
@@ -223,6 +223,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!user) return;
+
+    // Sincronizar inscrição Web Push em segundo plano para receber com app fechado
+    syncPushSubscription(user.uid);
 
     // Flags locais para esta execução do efeito
     let isInitialPlayersSync = true;

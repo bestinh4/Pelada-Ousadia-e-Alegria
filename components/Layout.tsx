@@ -1,6 +1,7 @@
 import React from 'react';
 import { Page } from '../types.ts';
 import { MAIN_LOGO_URL } from '../constants.tsx';
+import { PWAInstallButton } from './PWAInstallButton.tsx';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -76,8 +77,9 @@ const Layout: React.FC<LayoutProps> = ({
             </div>
           </div>
 
-          {/* Right Action: Profile Access */}
+          {/* Right Action: Install Button (only if not installed) + Profile Access */}
           <div className="flex items-center gap-2 shrink-0">
+            <PWAInstallButton variant="header" />
             <button 
               onClick={() => onPageChange(Page.Profile)}
               className={`h-9 pl-1.5 pr-2.5 rounded-full flex items-center gap-2 transition-all duration-150 active:scale-95 border ${

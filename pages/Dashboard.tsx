@@ -9,6 +9,7 @@ import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
 import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
 import { getCurrentMonthKey, getMonthName, getMensalistaPaymentInfo, MENSALISTA_DUE_DAY } from '../utils/mensalistaUtils.ts';
 import { playSound, playWhistleSound } from '../utils/sound.ts';
+import { PWAInstallButton } from '../components/PWAInstallButton.tsx';
 
 interface DashboardProps {
   match: Match | null;
@@ -479,6 +480,9 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="flex flex-col w-full max-w-3xl mx-auto pb-6 gap-4 animate-fade-in">
+      {/* BANNER DE INSTALAÇÃO DO APP (EXIBIDO APENAS SE NÃO ESTIVER INSTALADO DE FORMA CORRETA) */}
+      <PWAInstallButton variant="banner" />
+
       {/* BANNER DE LEMBRETE DE VÉSPERA PARA ATLETAS COM STATUS PENDENTE */}
       {!isConfirmed && !isRefused && (
         <div className={`w-full rounded-2xl p-3.5 sm:p-4 shadow-sm border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${

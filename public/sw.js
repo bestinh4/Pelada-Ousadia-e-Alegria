@@ -105,23 +105,27 @@ self.addEventListener('message', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  console.log("📥 SW: Push recebido!");
+  console.log("📥 SW: Push recebido em segundo plano!");
   
-  // Se o Firebase Messaging estiver ativo, ele pode lidar com a notificação
-  // Mas mantemos este listener para garantir redundância ou lidar com data messages
-  let data = { title: 'Ousadia & Alegria', body: 'Novidades na Arena!' };
+  let data = { 
+    title: 'Ousadia & Alegria', 
+    body: 'Novidades na Pelada!', 
+    url: '/', 
+    soundPattern: 'single',
+    tag: 'oa-notification-' + Date.now()
+  };
   
   try {
     if (event.data) {
       const payload = event.data.json();
       console.log("📥 SW: Payload JSON:", payload);
       
-      // FCM pode enviar no formato { notification: { title, body }, data: { url } }
-      // ou direto no root se for data message
       data = {
         title: payload.notification?.title || payload.title || data.title,
         body: payload.notification?.body || payload.body || data.body,
-        url: payload.data?.url || payload.url || '/'
+        url: payload.data?.url || payload.url || '/',
+        soundPattern: payload.soundPattern || payload.data?.soundPattern || 'single',
+        tag: payload.tag || ('oa-notification-' + Date.now())
       };
     }
   } catch (e) {
@@ -129,14 +133,27 @@ self.addEventListener('push', (event) => {
     data.body = event.data ? event.data.text() : data.body;
   }
 
+  const soundPattern = data.soundPattern || 'single';
+  const vibratePattern = soundPattern === 'triple'
+    ? [200, 100, 200, 100, 450]
+    : soundPattern === 'double'
+      ? [200, 100, 250]
+      : soundPattern === 'start'
+        ? [500]
+        : [200, 100, 200];
+
   const options = {
     body: data.body,
-    icon: '/pwa-192x192.png?v=20',
-    badge: '/pwa-192x192.png?v=20',
-    vibrate: [200, 100, 200, 100, 200],
-    tag: 'oa-notification',
+    icon: '/pwa-192x192.png?v=21',
+    badge: '/pwa-192x192.png?v=21',
+    vibrate: vibratePattern,
+    tag: data.tag,
     renotify: true,
-    data: { url: data.url || '/' }
+    requireInteraction: true,
+    data: { 
+      url: data.url || '/',
+      soundPattern: data.soundPattern
+    }
   };
 
   event.waitUntil(self.registration.showNotification(data.title, options));

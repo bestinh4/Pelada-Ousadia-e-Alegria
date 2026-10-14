@@ -3,6 +3,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { Player, Page } from '../types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
 import { requestNotificationPermission, getNotificationStatus, sendPushNotification } from '../services/notificationService.ts';
+import { PWAInstallButton } from '../components/PWAInstallButton.tsx';
 
 const Profile: React.FC<{ 
   player: Player; 
@@ -290,6 +291,9 @@ const Profile: React.FC<{
               </button>
             )}
           </div>
+
+          {/* Banner de Instalação PWA (exibido apenas para quem ainda não instalou) */}
+          <PWAInstallButton variant="banner" />
 
           {/* Notifications Card */}
           <div className="w-full bg-surface-container-lowest p-space-md rounded-2xl shadow-sm border border-surface-container-high/40 flex flex-col gap-3">

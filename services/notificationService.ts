@@ -1,12 +1,56 @@
 
-import { db, doc, updateDoc, collection, addDoc, messaging, getToken, onMessage } from './firebase.ts';
+import { db, doc, updateDoc, collection, addDoc, getDocs, query, where, messaging, getToken, onMessage } from './firebase.ts';
 import { playWhistleSound, WhistlePattern } from '../utils/sound.ts';
+import { VAPID_PUBLIC_KEY } from '../constants/vapid.ts';
 
-const VAPID_KEY = "BHT6LWPFyDCj0inYpPKEXBh3rXptm3alhFnLQFcVmPZVscVKdEfz-3-JalE_Fjx8V538kqR46EJ6w4o1JatMins"; // Chave pública VAPID do console Firebase
+const VAPID_KEY = VAPID_PUBLIC_KEY;
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
 
 export const getNotificationStatus = () => {
   if (!('Notification' in window)) return 'unsupported';
   return Notification.permission;
+};
+
+/**
+ * Garante silenciosamente que o atleta autenticado com permissão ativa
+ * tenha a inscrição W3C Web Push registrada e atualizada no Firestore.
+ */
+export const syncPushSubscription = async (userId: string) => {
+  if (!userId || typeof window === 'undefined') return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!('serviceWorker' in navigator)) return;
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+
+    if (subscription) {
+      const subJson = subscription.toJSON();
+      await updateDoc(doc(db, "players", userId), {
+        pushEnabled: true,
+        pushSubscription: subJson,
+        lastPushSyncAt: new Date().toISOString()
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn("Aviso ao sincronizar push subscription silenciosamente:", err);
+  }
 };
 
 export const requestNotificationPermission = async (userId?: string) => {
@@ -21,7 +65,7 @@ export const requestNotificationPermission = async (userId?: string) => {
     console.log('🔔 Status da permissão:', permission);
     
     if (permission === 'denied') {
-      alert("As notificações foram bloqueadas. Para recebê-las no celular ou PC, toque no cadeado ou ícone de configurações ao lado do endereço do site e permita as notificações.");
+      alert("As notificações foram bloqueadas. Para recebê-las no celular ou PC mesmo com o app fechado, toque no cadeado ou ícone de configurações ao lado do endereço do site e permita as notificações.");
     }
     
     if (permission === 'granted') {
@@ -32,7 +76,33 @@ export const requestNotificationPermission = async (userId?: string) => {
         const userRef = doc(db, "players", userId);
         await updateDoc(userRef, { pushEnabled: true }).catch(() => {});
         
-        // Obter Token FCM para notificações em background
+        // 1. Inscrever no padrão W3C Web Push para entrega com app fechado
+        if ('serviceWorker' in navigator) {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+            let subscription = await registration.pushManager.getSubscription();
+            if (!subscription) {
+              subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+              });
+            }
+
+            if (subscription) {
+              const subJson = subscription.toJSON();
+              await updateDoc(userRef, {
+                pushEnabled: true,
+                pushSubscription: subJson,
+                pushSubscribedAt: new Date().toISOString()
+              }).catch(() => {});
+              console.log("✅ Inscrição Web Push para background salva com sucesso!");
+            }
+          } catch (subErr) {
+            console.warn("⚠️ Aviso ao registrar inscrição Web Push:", subErr);
+          }
+        }
+
+        // 2. Obter Token FCM como contingência
         if (messaging) {
           try {
             const registration = await navigator.serviceWorker.ready;
@@ -80,7 +150,7 @@ export const broadcastNotification = async (
     // 1. Tocar som de apito localmente imediatamente para o usuário atual
     playWhistleSound(soundPattern);
 
-    // 2. Salvar no Firestore (para histórico e entrega em tempo real para todos os celulares e computadores)
+    // 2. Salvar no Firestore (para histórico e entrega em tempo real para todos os celulares e computadores conectados)
     await addDoc(collection(db, "notifications"), {
       title,
       body,
@@ -91,12 +161,41 @@ export const broadcastNotification = async (
       senderId: senderId || null
     });
 
-    // 3. Chamar a API para disparo imediato via FCM (se configurado)
+    // 3. Buscar todas as inscrições Web Push registradas no Firestore para entrega mesmo com app FECHADO
+    let subscriptions: any[] = [];
+    try {
+      const qPlayers = query(collection(db, "players"), where("pushEnabled", "==", true));
+      const playersSnap = await getDocs(qPlayers);
+      playersSnap.forEach((docSnap) => {
+        const p = docSnap.data();
+        if (targetStatus === 'pendente') {
+          const st = p.status || 'pendente';
+          if (st !== 'pendente') return;
+        }
+        if (p.pushSubscription && p.pushSubscription.endpoint) {
+          subscriptions.push(p.pushSubscription);
+        }
+      });
+      console.log(`📱 Encontradas ${subscriptions.length} inscrições para envio com app fechado.`);
+    } catch (qErr) {
+      console.warn("Aviso ao buscar push subscriptions dos atletas:", qErr);
+    }
+
+    // 4. Chamar a API server-side para envio do Web Push em background
     await fetch('/api/send-notification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, body, url: '/', targetStatus, soundPattern })
-    }).catch(() => {});
+      body: JSON.stringify({ 
+        title, 
+        body, 
+        url: '/', 
+        targetStatus, 
+        soundPattern,
+        subscriptions
+      })
+    }).catch((err) => {
+      console.warn("Aviso ao disparar Web Push no servidor:", err);
+    });
 
   } catch (error) {
     console.error("❌ Erro ao transmitir notificação:", error);
