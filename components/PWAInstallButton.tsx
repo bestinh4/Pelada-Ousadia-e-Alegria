@@ -179,8 +179,21 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
                     3
                   </div>
                   <div className="min-w-0">
-                    Confirme em <strong>"Instalar"</strong>. O app será baixado e fixado na tela do seu celular!
+                    Confirme em <strong>"Instalar"</strong> ou <strong>"Adicionar"</strong>. O app será fixado na tela do seu celular!
                   </div>
+                </div>
+
+                {/* Dica essencial para o aviso do Google Play Protect */}
+                <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-amber-950 flex flex-col gap-1.5 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-amber-900">
+                    <span className="material-symbols-outlined text-[18px] text-amber-600">security</span>
+                    <span>Apareceu o aviso "App de risco bloqueado"?</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-amber-900/90">
+                    Fique 100% tranquilo! Esse aviso padrão do <strong>Google Play Protect</strong> acontece no Android porque o app é instalado direto pelo navegador (PWA) e não pela Google Play Store.<br />
+                    • <strong>Como passar:</strong> Na tela do aviso, toque em <strong>"Mais detalhes ˅"</strong> e em seguida em <strong>"Instalar assim mesmo"</strong>.<br />
+                    • <strong>Ou pelo Chrome:</strong> Toque nos 3 pontinhos (⋮) e escolha <strong>"Adicionar à tela inicial"</strong>.
+                  </p>
                 </div>
               </div>
             </div>

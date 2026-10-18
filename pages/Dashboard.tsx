@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, Player, Page, PixConfig } from '../types.ts';
-import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc } from '../services/firebase.ts';
+import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query, where, orderBy, limit } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
@@ -126,34 +126,6 @@ const Dashboard: React.FC<DashboardProps> = ({
     checkSharedReceipt();
   }, []);
 
-  // Correção: O mês de outubro ainda não está pago. Reseta os mensalistas para pendente para pagarem até dia 10.
-  const hasResetOctoberMensalistasRef = React.useRef(false);
-  useEffect(() => {
-    if (players.length === 0 || hasResetOctoberMensalistasRef.current) return;
-    const hasAlreadyReset = localStorage.getItem('oa_mensalistas_oct_reset_v2');
-    if (hasAlreadyReset) return;
-    hasResetOctoberMensalistasRef.current = true;
-
-    const currentMonthKey = getCurrentMonthKey();
-    const mensalistasToReset = players.filter(
-      p => p.playerType === 'mensalista' && (p.monthlyPaid || p.monthlyPaidMonth === currentMonthKey)
-    );
-
-    if (mensalistasToReset.length > 0) {
-      Promise.all(
-        mensalistasToReset.map(p =>
-          updateDoc(doc(db, "players", p.id), {
-            monthlyPaid: false,
-            monthlyPaidMonth: null
-          }).catch(() => {})
-        )
-      ).then(() => {
-        localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
-      }).catch(() => {});
-    } else {
-      localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
-    }
-  }, [players]);
 
   const handleSaveFinancePrices = async () => {
     if (!isCurrentUserAdmin) return;
@@ -190,6 +162,30 @@ const Dashboard: React.FC<DashboardProps> = ({
   const isConfirmed = currentPlayer?.status === 'presente';
   const isRefused = currentPlayer?.status === 'ausente';
 
+  // Comprovante recente do atleta atual para auditoria e garantia de status PAGO
+  const [currentAthleteReceipt, setCurrentAthleteReceipt] = useState<any>(null);
+  useEffect(() => {
+    if (!currentPlayer?.id) return;
+    const qReceipt = query(
+      collection(db, "receipts"),
+      where("playerId", "==", currentPlayer.id),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    );
+    const unsub = onSnapshot(
+      qReceipt,
+      (snap) => {
+        if (!snap.empty) {
+          setCurrentAthleteReceipt(snap.docs[0].data());
+        } else {
+          setCurrentAthleteReceipt(null);
+        }
+      },
+      () => {}
+    );
+    return () => unsub();
+  }, [currentPlayer?.id]);
+
   const isMaster = user?.email === MASTER_ADMIN_EMAIL;
   const isCurrentUserAdmin = isMaster || currentUserRole === 'admin' || currentPlayer?.role === 'admin';
 
@@ -203,6 +199,36 @@ const Dashboard: React.FC<DashboardProps> = ({
       updateDoc(doc(db, "matches", match.id), { location: 'Granja Cantinho do Céu' }).catch(() => {});
     }
   }, [match]);
+
+  // Auto-cura: Se o atleta possui comprovante aprovado para esta pelada mas o status consta como pendente, sincronizar para 'pago'
+  useEffect(() => {
+    if (!currentPlayer?.id) return;
+    const isGK = currentPlayer.position === 'Goleiro';
+    if (isGK) return;
+
+    const hasApprovedReceipt = Boolean(
+      currentAthleteReceipt &&
+      (currentAthleteReceipt.matchDate === match?.date ||
+       currentAthleteReceipt.matchId === match?.id ||
+       (currentAthleteReceipt.createdAt && (Date.now() - new Date(currentAthleteReceipt.createdAt).getTime() < 48 * 60 * 60 * 1000)))
+    );
+
+    if (hasApprovedReceipt && currentPlayer.paymentStatus !== 'pago') {
+      const updates: any = {
+        paymentStatus: 'pago',
+        paidMatchId: match?.id || '',
+        paidMatchDate: match?.date || ''
+      };
+      if (currentPlayer.playerType === 'mensalista') {
+        updates.monthlyPaid = true;
+        updates.monthlyPaidMonth = getCurrentMonthKey();
+      }
+      setDoc(doc(db, "players", currentPlayer.id), updates, { merge: true }).catch(() => {});
+      if (user?.uid && user.uid !== currentPlayer.id) {
+        setDoc(doc(db, "players", user.uid), updates, { merge: true }).catch(() => {});
+      }
+    }
+  }, [currentPlayer?.id, currentPlayer?.paymentStatus, currentAthleteReceipt, match?.id, match?.date, user?.uid]);
 
   const updatePresence = async (newStatus: 'presente' | 'ausente') => {
     if (!user || isUpdating) return;
@@ -376,11 +402,22 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (peladaModalMode === 'new_list') {
         // Atualizar todos os atletas para a nova pelada com status 'pendente' (Regra oficial: mensalistas e avulsos devem confirmar na lista)
         const promises = players.map(async (p) => {
+          const isMensal = p.playerType === 'mensalista';
+          // Se o avulso já efetuou pagamento recente ou com comprovante para esta data/pelada, preservar como PAGO!
+          const isAlreadyPaidForNewPelada = 
+            p.paymentStatus === 'pago' && 
+            (p.paidMatchDate === cleanDate || 
+             (p.lastPaymentAt && (Date.now() - new Date(p.lastPaymentAt).getTime() < 36 * 60 * 60 * 1000)));
+
           return updateDoc(doc(db, "players", p.id), {
             status: 'pendente',
             confirmedAt: null,
             courtCheckIn: false,
-            paymentStatus: p.playerType === 'mensalista' ? (p.paymentStatus || 'pendente') : 'pendente'
+            paymentStatus: isMensal 
+              ? (p.paymentStatus || 'pendente') 
+              : isAlreadyPaidForNewPelada 
+                ? 'pago' 
+                : 'pendente'
           });
         });
 
@@ -846,7 +883,20 @@ const Dashboard: React.FC<DashboardProps> = ({
               const isGoleiroExempt = currentPlayer.position === 'Goleiro';
               const isMensal = currentPlayer.playerType === 'mensalista';
               const mensalistaInfo = isMensal ? getMensalistaPaymentInfo(currentPlayer) : null;
-              const isPaidNow = isGoleiroExempt || (isMensal ? Boolean(mensalistaInfo?.isPaid) : currentPlayer.paymentStatus === 'pago');
+              
+              // Reconhecimento de comprovante recente aprovado para a pelada atual
+              const hasValidRecentReceipt = Boolean(
+                currentAthleteReceipt &&
+                (currentAthleteReceipt.matchDate === match?.date ||
+                 currentAthleteReceipt.matchId === match?.id ||
+                 (currentAthleteReceipt.createdAt && (Date.now() - new Date(currentAthleteReceipt.createdAt).getTime() < 48 * 60 * 60 * 1000)))
+              );
+
+              const isPaidNow = isGoleiroExempt || (
+                isMensal 
+                  ? Boolean(mensalistaInfo?.isPaid || currentPlayer.monthlyPaid || currentPlayer.paymentStatus === 'pago' || hasValidRecentReceipt)
+                  : Boolean(currentPlayer.paymentStatus === 'pago' || hasValidRecentReceipt || (match?.date && currentPlayer.paidMatchDate === match.date) || (match?.id && currentPlayer.paidMatchId === match.id))
+              );
               const hasFineNow = Boolean(currentPlayer.hasNoShowFine || currentPlayer.hasLateRemovalFine);
               const fineValNow = hasFineNow ? (currentPlayer.fineAmount || prices.multa || 20) : 0;
               const baseValNow = isGoleiroExempt ? 0 : (isMensal ? prices.mensalista : prices.avulso);
@@ -962,29 +1012,42 @@ const Dashboard: React.FC<DashboardProps> = ({
                       );
                     }
 
-                    // Para o Avulso: aparece toda pelada
+                    // Para o Avulso: quando confirmado, exibe status de confirmado e NÃO fica cobrando o atleta
                     if (!isGoleiroExempt || hasFineNow) {
+                      if (isPaidNow && !hasFineNow) {
+                        return (
+                          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                            <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-300">
+                              <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                              <span>Confirmado na Pelada</span>
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setIsPixModalOpen(true)}
+                              className="text-xs text-outline hover:text-navy-deep font-semibold underline px-2 py-1"
+                              title="Visualizar ou reenviar comprovante"
+                            >
+                              Ver Comprovante
+                            </button>
+                          </div>
+                        );
+                      }
+
                       return (
                         <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
                           <button
                             type="button"
                             onClick={() => setIsPixModalOpen(true)}
-                            className={`w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all ${
-                              isPaidNow && !hasFineNow
-                                ? 'bg-white hover:bg-surface-container text-navy-deep border border-emerald-300'
-                                : 'bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25'
-                            }`}
+                            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25"
                           >
                             <PixIcon
                               className="w-4 h-4"
-                              color={isPaidNow && !hasFineNow ? '#32BCAD' : '#ffffff'}
+                              color="#ffffff"
                             />
                             <span>
-                              {isPaidNow && !hasFineNow
-                                ? 'Ver Pix / Novo Comprovante'
-                                : hasFineNow
-                                  ? 'Pagar Pelada + Multa'
-                                  : 'Pagar com Pix / Comprovante'}
+                              {hasFineNow
+                                ? 'Pagar Pelada + Multa'
+                                : 'Pagar com Pix / Comprovante'}
                             </span>
                           </button>
                         </div>

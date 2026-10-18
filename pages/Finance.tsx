@@ -58,34 +58,6 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   const currentMonthKey = getCurrentMonthKey();
   const currentMonthName = getMonthName();
 
-  // Correção: O mês de outubro ainda não está pago. Reseta os mensalistas para aberto até dia 10.
-  const hasResetOctoberMensalistas = React.useRef(false);
-  useEffect(() => {
-    if (!isUserAdmin || players.length === 0 || hasResetOctoberMensalistas.current) return;
-    const hasAlreadyReset = localStorage.getItem('oa_mensalistas_oct_reset_v2');
-    if (hasAlreadyReset) return;
-    hasResetOctoberMensalistas.current = true;
-
-    const mensalistasToReset = players.filter(
-      p => p.playerType === 'mensalista' && (p.monthlyPaid || p.monthlyPaidMonth === currentMonthKey)
-    );
-
-    if (mensalistasToReset.length > 0) {
-      Promise.all(
-        mensalistasToReset.map(p =>
-          updateDoc(doc(db, "players", p.id), {
-            monthlyPaid: false,
-            monthlyPaidMonth: null
-          }).catch(e => console.error("Erro ao resetar mensalista:", e))
-        )
-      ).then(() => {
-        localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
-      }).catch(() => {});
-    } else {
-      localStorage.setItem('oa_mensalistas_oct_reset_v2', 'true');
-    }
-  }, [players, isUserAdmin, currentMonthKey]);
-
   const handleMarkAllMensalistasPaid = async () => {
     if (!isUserAdmin) return;
     setIsSyncingMensalistas(true);
@@ -225,7 +197,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
   const checkIsPlayerPaid = (p: Player) => {
     if (checkIsExempt(p)) return true;
     if (p.playerType === 'mensalista') {
-      return Boolean(p.monthlyPaid && p.monthlyPaidMonth === currentMonthKey);
+      return Boolean(p.monthlyPaid && p.monthlyPaidMonth === currentMonthKey) || p.paymentStatus === 'pago';
     }
     return p.paymentStatus === 'pago';
   };
@@ -256,9 +228,10 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
       const isMensalista = player.playerType === 'mensalista';
       const updates: any = {};
       if (isMensalista) {
-        const nextPaid = !player.monthlyPaid;
+        const nextPaid = !(player.monthlyPaid && player.monthlyPaidMonth === currentMonthKey);
         updates.monthlyPaid = nextPaid;
         updates.monthlyPaidMonth = nextPaid ? currentMonthKey : null;
+        updates.paymentStatus = nextPaid ? 'pago' : 'pendente';
       } else {
         updates.paymentStatus = player.paymentStatus === 'pago' ? 'pendente' : 'pago';
       }

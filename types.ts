@@ -26,6 +26,8 @@ export interface Player {
   monthlyPaid?: boolean;
   monthlyPaidMonth?: string; // e.g. '2026-10'
   paymentStatus?: 'pago' | 'pendente';
+  paidMatchId?: string;
+  paidMatchDate?: string;
   lastPaymentAt?: string;
   lastPaymentAmount?: number;
   lastReceiptId?: string;

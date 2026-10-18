@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Player, Match, PixConfig } from '../types.ts';
 import { generatePixPayload } from '../utils/pixUtils.ts';
-import { db, doc, updateDoc, collection, addDoc, getDocs, query, where } from '../services/firebase.ts';
+import { db, doc, updateDoc, setDoc, collection, addDoc, getDocs, query, where } from '../services/firebase.ts';
 import { playSound } from '../utils/sound.ts';
 import { getCurrentMonthKey, getMensalistaPaymentInfo, getMonthName } from '../utils/mensalistaUtils.ts';
 
@@ -128,7 +128,9 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
 }) => {
   const isMensalista = player.playerType === 'mensalista';
   const basePrice = isMensalista ? (prices.mensalista || 60) : (prices.avulso || 40);
-  const isBasePaid = isMensalista ? Boolean(player.monthlyPaid) : player.paymentStatus === 'pago';
+  const currentMonthKey = getCurrentMonthKey();
+  const isMensalPaidMonth = Boolean(player.monthlyPaid && player.monthlyPaidMonth === currentMonthKey);
+  const isBasePaid = isMensalista ? isMensalPaidMonth : player.paymentStatus === 'pago';
   const hasFine = Boolean(player.hasNoShowFine || player.hasLateRemovalFine);
   const fineValue = hasFine ? (player.fineAmount || prices.multa || 20) : 0;
 
@@ -269,10 +271,53 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
           query(collection(db, 'receipts'), where('transactionId', '==', cleanTxId))
         );
         if (!dupSnap.empty) {
+          // Se o comprovante já existente pertence a este mesmo atleta, revalidar imediatamente sem travar
+          const samePlayerReceipt = dupSnap.docs.find(d => {
+            const rData = d.data();
+            return (
+              rData.playerId === player.id ||
+              (player.email && rData.playerId === player.email) ||
+              (rData.playerName && rData.playerName.toLowerCase() === player.name.toLowerCase())
+            );
+          });
+
+          if (samePlayerReceipt) {
+            const rData = samePlayerReceipt.data();
+            const playerUpdates: Record<string, any> = {
+              paymentStatus: 'pago',
+              paidMatchId: match?.id || rData.matchId || '',
+              paidMatchDate: match?.date || rData.matchDate || '',
+              lastReceiptId: samePlayerReceipt.id,
+              lastReceiptSummary: rData.summary || `Pix confirmado anteriormente`,
+              lastPaymentAt: rData.createdAt || new Date().toISOString()
+            };
+            if (isMensalista) {
+              playerUpdates.monthlyPaid = true;
+              playerUpdates.monthlyPaidMonth = currentMonthKey;
+            }
+            if (hasFine) {
+              playerUpdates.hasNoShowFine = false;
+              playerUpdates.hasLateRemovalFine = false;
+              playerUpdates.fineAmount = 0;
+              playerUpdates.fineReason = null;
+            }
+
+            await setDoc(doc(db, 'players', player.id), playerUpdates, { merge: true });
+            playSound('cheer');
+            setVerificationResult({
+              status: 'success',
+              title: 'Comprovante Reconhecido! ✅',
+              message: 'Seu comprovante já havia sido recebido e seu status foi revalidado como PAGO na pelada!',
+              details: `ID: ${cleanTxId}`
+            });
+            setIsVerifying(false);
+            return;
+          }
+
           setVerificationResult({
             status: 'error',
-            title: 'Comprovante Já Utilizado',
-            message: 'Este comprovante Pix (mesmo ID de transação) já foi enviado e registrado anteriormente.'
+            title: 'Comprovante Já Utilizado por Outro Atleta',
+            message: 'Este comprovante Pix (mesmo ID de transação) já foi registrado para outro atleta na pelada.'
           });
           setIsVerifying(false);
           return;
@@ -334,26 +379,25 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         lastReceiptId: receiptDocRef.id,
         lastReceiptSummary:
           data.summary ||
-          `R$ ${finalAmount.toFixed(2)} (${data.bankName || 'Pix'})`
+          `R$ ${finalAmount.toFixed(2)} (${data.bankName || 'Pix'})`,
+        paymentStatus: 'pago',
+        paidMatchId: match?.id || '',
+        paidMatchDate: match?.date || ''
       };
 
-      if (!isBasePaid) {
-        if (isMensalista) {
-          playerUpdates.monthlyPaid = true;
-          playerUpdates.monthlyPaidMonth = getCurrentMonthKey();
-        } else {
-          playerUpdates.paymentStatus = 'pago';
-        }
+      if (isMensalista) {
+        playerUpdates.monthlyPaid = true;
+        playerUpdates.monthlyPaidMonth = currentMonthKey;
       }
 
-      if (hasFine && (includeFine || isBasePaid)) {
+      if (hasFine) {
         playerUpdates.hasNoShowFine = false;
         playerUpdates.hasLateRemovalFine = false;
         playerUpdates.fineAmount = 0;
         playerUpdates.fineReason = null;
       }
 
-      await updateDoc(doc(db, 'players', player.id), playerUpdates);
+      await setDoc(doc(db, 'players', player.id), playerUpdates, { merge: true });
       playSound('cheer');
 
       setVerificationResult({
@@ -370,23 +414,22 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         const playerUpdates: Record<string, any> = {
           lastPaymentAt: nowIso,
           lastPaymentAmount: expectedAmount,
-          lastReceiptSummary: `R$ ${expectedAmount.toFixed(2)} (Comprovante Anexado)`
+          lastReceiptSummary: `R$ ${expectedAmount.toFixed(2)} (Comprovante Anexado)`,
+          paymentStatus: 'pago',
+          paidMatchId: match?.id || '',
+          paidMatchDate: match?.date || ''
         };
-        if (!isBasePaid) {
-          if (isMensalista) {
-            playerUpdates.monthlyPaid = true;
-            playerUpdates.monthlyPaidMonth = getCurrentMonthKey();
-          } else {
-            playerUpdates.paymentStatus = 'pago';
-          }
+        if (isMensalista) {
+          playerUpdates.monthlyPaid = true;
+          playerUpdates.monthlyPaidMonth = currentMonthKey;
         }
-        if (hasFine && (includeFine || isBasePaid)) {
+        if (hasFine) {
           playerUpdates.hasNoShowFine = false;
           playerUpdates.hasLateRemovalFine = false;
           playerUpdates.fineAmount = 0;
           playerUpdates.fineReason = null;
         }
-        await updateDoc(doc(db, 'players', player.id), playerUpdates);
+        await setDoc(doc(db, 'players', player.id), playerUpdates, { merge: true });
         playSound('cheer');
         setVerificationResult({
           status: 'success',
