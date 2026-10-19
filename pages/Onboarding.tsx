@@ -109,7 +109,6 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
               <option value="" disabled>Selecione sua posição...</option>
               <option value="Goleiro">Goleiro (ISENTO 🧤)</option>
               <option value="Zagueiro">Zagueiro</option>
-              <option value="Lateral">Lateral</option>
               <option value="Volante">Volante</option>
               <option value="Meia">Meia</option>
               <option value="Atacante">Atacante</option>

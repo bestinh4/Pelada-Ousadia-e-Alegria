@@ -564,10 +564,8 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                           >
                             <option value="Goleiro">🧤 Goleiro</option>
                             <option value="Zagueiro">🛡️ Zagueiro</option>
-                            <option value="Lateral">⚡ Lateral</option>
                             <option value="Volante">⚓ Volante</option>
                             <option value="Meia">🎯 Meia</option>
-                            <option value="Meia-atacante">🪄 Meia-atacante</option>
                             <option value="Atacante">⚽ Atacante</option>
                           </select>
                         ) : (
@@ -757,10 +755,8 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                 >
                   <option value="Goleiro">🧤 Goleiro</option>
                   <option value="Zagueiro">🛡️ Zagueiro</option>
-                  <option value="Lateral">⚡ Lateral</option>
                   <option value="Volante">⚓ Volante</option>
                   <option value="Meia">🎯 Meia</option>
-                  <option value="Meia-atacante">🪄 Meia-atacante</option>
                   <option value="Atacante">⚽ Atacante</option>
                 </select>
               </div>

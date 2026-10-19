@@ -1489,11 +1489,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                     onChange={(e) => setNewPlayerData({ ...newPlayerData, position: e.target.value })}
                     className="w-full p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high outline-none font-body-md text-navy-deep font-semibold"
                   >
-                    <option value="Atacante">Atacante</option>
-                    <option value="Meia">Meia</option>
-                    <option value="Zagueiro">Zagueiro</option>
-                    <option value="Lateral">Lateral</option>
                     <option value="Goleiro">Goleiro</option>
+                    <option value="Zagueiro">Zagueiro</option>
+                    <option value="Volante">Volante</option>
+                    <option value="Meia">Meia</option>
+                    <option value="Atacante">Atacante</option>
                   </select>
                 </div>
 
