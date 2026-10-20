@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { CoverTeam, Player } from '../types.ts';
 import { db, doc, onSnapshot, setDoc, deleteDoc, collection, getDocs, query, orderBy, limit, addDoc } from '../services/firebase.ts';
-import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
+import { MASTER_ADMIN_EMAIL, OFFICIAL_INSTAGRAM_URL, OFFICIAL_INSTAGRAM_HANDLE } from '../constants.tsx';
 
 interface CoverTeamSectionProps {
   players: Player[];
@@ -34,8 +34,8 @@ async function compressCoverPhoto(file: File): Promise<string> {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1200;
-        const MAX_HEIGHT = 1200;
+        const MAX_WIDTH = 1600;
+        const MAX_HEIGHT = 1600;
         let width = img.width;
         let height = img.height;
 
@@ -60,8 +60,8 @@ async function compressCoverPhoto(file: File): Promise<string> {
         }
 
         ctx.drawImage(img, 0, 0, width, height);
-        // Qualidade 0.82 gera ~100-140KB com visual impecável
-        const base64 = canvas.toDataURL('image/jpeg', 0.82);
+        // Qualidade 0.84 gera ~120-170KB com nitidez impecável
+        const base64 = canvas.toDataURL('image/jpeg', 0.84);
         resolve(base64);
       };
       img.onerror = reject;
@@ -82,6 +82,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [lightboxZoom, setLightboxZoom] = useState(1);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
   // Estados do formulário de edição
@@ -183,9 +184,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         teamName: prefilledTeam.teamName || prefilledTeam.name || 'Time Campeão',
         photoUrl: '',
         matchDate: prefilledTeam.matchDate || todayStr,
-        editionTitle: 'Time Capa da Semana',
+        editionTitle: 'Time da Semana',
         caption: 'Parabéns à equipe campeã pelo show de bola e pela vitória na pelada! 🏆⚽',
-        instagramUrl: '',
+        instagramUrl: OFFICIAL_INSTAGRAM_URL,
         playerIds: Array.isArray(prefilledTeam.playerIds) ? prefilledTeam.playerIds : [],
         highlightPlayer: ''
       });
@@ -194,9 +195,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         teamName: coverTeam.teamName || '',
         photoUrl: coverTeam.photoUrl || '',
         matchDate: coverTeam.matchDate || todayStr,
-        editionTitle: coverTeam.editionTitle || 'Time Capa da Semana',
+        editionTitle: coverTeam.editionTitle || 'Time da Semana',
         caption: coverTeam.caption || '',
-        instagramUrl: coverTeam.instagramUrl || '',
+        instagramUrl: coverTeam.instagramUrl || OFFICIAL_INSTAGRAM_URL,
         playerIds: coverTeam.playerIds || [],
         highlightPlayer: coverTeam.highlightPlayer || ''
       });
@@ -205,9 +206,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         teamName: 'Time 1 - Campeão da Pelada',
         photoUrl: '',
         matchDate: todayStr,
-        editionTitle: 'Time Capa da Semana',
+        editionTitle: 'Time da Semana',
         caption: 'Parabéns à equipe campeã pelo show de bola e pela vitória na pelada! 🏆⚽',
-        instagramUrl: '',
+        instagramUrl: OFFICIAL_INSTAGRAM_URL,
         playerIds: [],
         highlightPlayer: ''
       });
@@ -370,7 +371,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                 <span className="text-[10px] font-bold uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full">
                   Instagram Oficial
                 </span>
-                <span className="text-xs font-bold text-amber-300">📸 Time Capa da Semana</span>
+                <span className="text-xs font-bold text-amber-300">📸 Time da Semana</span>
               </div>
               <p className="text-xs text-white/80 mt-0.5">
                 Ao final da pelada, a foto da equipe campeã é tirada e destacada aqui e no nosso perfil!
@@ -378,13 +379,13 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
             </div>
           </div>
           <a
-            href="https://www.instagram.com"
+            href={OFFICIAL_INSTAGRAM_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-95 text-white font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0"
           >
             <InstagramIcon className="w-4 h-4" color="#ffffff" />
-            <span>Seguir no Instagram</span>
+            <span>Seguir {OFFICIAL_INSTAGRAM_HANDLE}</span>
           </a>
         </div>
       );
@@ -607,15 +608,19 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                 </div>
               )}
 
-              {/* Preview da Imagem */}
+              {/* Preview da Imagem Sem Cortes */}
               {formData.photoUrl && (
-                <div className="relative w-full h-44 rounded-xl overflow-hidden bg-slate-900 border border-surface-container-high/60 shadow-inner group">
+                <div className="relative w-full h-56 rounded-xl overflow-hidden bg-slate-950 border border-surface-container-high/60 shadow-inner group flex items-center justify-center">
+                  <div
+                    className="absolute inset-0 bg-cover bg-center blur-xl opacity-35 scale-110 pointer-events-none"
+                    style={{ backgroundImage: `url(${formData.photoUrl})` }}
+                  />
                   <img
                     src={formData.photoUrl}
-                    alt="Pré-visualização"
-                    className="w-full h-full object-cover"
+                    alt="Pré-visualização do time da semana"
+                    className="w-full h-full object-contain relative z-10"
                   />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-20">
                     <button
                       type="button"
                       onClick={() => setFormData({ ...formData, photoUrl: '' })}
@@ -625,8 +630,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                       <span>Remover Foto</span>
                     </button>
                   </div>
-                  <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-white text-[10px] font-bold">
-                    ✅ Foto Carregada
+                  <span className="absolute bottom-2 left-2 px-2.5 py-1 rounded bg-black/75 text-white text-[10px] font-bold z-20 flex items-center gap-1">
+                    <span>✅</span>
+                    <span>Foto Completa sem Cortes</span>
                   </span>
                 </div>
               )}
@@ -795,63 +801,111 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
     );
   }
 
-  // Render do Lightbox em Tela Cheia
+  // Render do Lightbox em Tela Cheia com Zoom Interativo
   function renderLightbox() {
     if (!coverTeam || typeof document === 'undefined') return null;
 
     return createPortal(
       <div
         style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 100000 }}
-        className="bg-black/95 backdrop-blur-md flex flex-col justify-between p-3 sm:p-6 select-none animate-fade-in"
-        onClick={() => setIsLightboxOpen(false)}
+        className="bg-black/95 backdrop-blur-md flex flex-col justify-between p-3 sm:p-5 select-none animate-fade-in"
+        onClick={() => {
+          setLightboxZoom(1);
+          setIsLightboxOpen(false);
+        }}
       >
         {/* Top bar */}
-        <div className="flex items-center justify-between text-white z-10" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">📸</span>
-            <div>
-              <h4 className="font-headline-sm text-sm sm:text-base font-bold text-white">
+        <div className="flex items-center justify-between text-white z-20 gap-2" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-xl shrink-0">📸</span>
+            <div className="min-w-0">
+              <h4 className="font-headline-sm text-sm sm:text-base font-bold text-white truncate">
                 {coverTeam.teamName}
               </h4>
-              <p className="text-xs text-white/70">{formattedMatchDate || 'Time Capa da Semana'}</p>
+              <p className="text-xs text-white/70 truncate">{formattedMatchDate || 'Time Capa da Semana'}</p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setIsLightboxOpen(false)}
-            className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all"
-          >
-            <span className="material-symbols-outlined text-[24px]">close</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Controles de Zoom */}
+            <div className="flex items-center bg-white/10 rounded-full p-0.5 border border-white/20">
+              <button
+                type="button"
+                onClick={() => setLightboxZoom(z => Math.max(1, +(z - 0.25).toFixed(2)))}
+                disabled={lightboxZoom <= 1}
+                className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 text-white disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                title="Reduzir Zoom"
+              >
+                <span className="material-symbols-outlined text-[18px]">remove</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLightboxZoom(1)}
+                className="px-2 text-xs font-mono font-bold text-amber-300 hover:underline"
+                title="Redefinir Zoom (100%)"
+              >
+                {Math.round(lightboxZoom * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={() => setLightboxZoom(z => Math.min(3, +(z + 0.25).toFixed(2)))}
+                disabled={lightboxZoom >= 3}
+                className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/20 text-white disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                title="Aumentar Zoom"
+              >
+                <span className="material-symbols-outlined text-[18px]">add</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setLightboxZoom(1);
+                setIsLightboxOpen(false);
+              }}
+              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all"
+              title="Fechar tela cheia"
+            >
+              <span className="material-symbols-outlined text-[24px]">close</span>
+            </button>
+          </div>
         </div>
 
-        {/* Center Image */}
-        <div className="flex-1 flex items-center justify-center p-2 min-h-0" onClick={(e) => e.stopPropagation()}>
+        {/* Center Image - Sem cortes, com zoom e rolagem suave se ampliada */}
+        <div 
+          className="flex-1 flex items-center justify-center p-2 min-h-0 overflow-auto scrollbar-none" 
+          onClick={(e) => e.stopPropagation()}
+        >
           <img
             src={coverTeam.photoUrl}
             alt={coverTeam.teamName}
-            className="max-w-full max-h-[75dvh] object-contain rounded-xl shadow-2xl"
+            style={{
+              transform: `scale(${lightboxZoom})`,
+              transformOrigin: 'center center',
+              transition: 'transform 0.2s cubic-bezier(0.2, 0, 0, 1)'
+            }}
+            className="max-w-full max-h-[82dvh] object-contain rounded-xl shadow-2xl cursor-pointer"
+            onClick={() => setLightboxZoom(z => z >= 2 ? 1 : +(z + 0.5).toFixed(2))}
+            title="Toque na foto para alternar o zoom"
           />
         </div>
 
         {/* Bottom bar */}
-        <div className="flex items-center justify-center gap-3 pt-2 z-10" onClick={(e) => e.stopPropagation()}>
-          {coverTeam.instagramUrl && (
-            <a
-              href={coverTeam.instagramUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg active:scale-95"
-            >
-              <InstagramIcon className="w-4 h-4" color="#ffffff" />
-              <span>Ver no Instagram</span>
-            </a>
-          )}
+        <div className="flex items-center justify-center gap-2.5 pt-2 z-20 flex-wrap" onClick={(e) => e.stopPropagation()}>
+          <a
+            href={coverTeam.instagramUrl || OFFICIAL_INSTAGRAM_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg active:scale-95 transition-all"
+          >
+            <InstagramIcon className="w-4 h-4" color="#ffffff" />
+            <span>Ver no Instagram Oficial</span>
+            <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+          </a>
           <button
             type="button"
             onClick={handleShare}
-            className="px-4 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold flex items-center gap-1.5 border border-white/20 active:scale-95"
+            className="px-4 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold flex items-center gap-1.5 border border-white/20 active:scale-95 transition-all"
           >
             <span className="material-symbols-outlined text-[18px]">share</span>
             <span>Compartilhar</span>
@@ -1013,60 +1067,85 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
 
       {/* Conteúdo Principal: Foto Panorâmica com Efeito Instagram */}
       <div className="mt-3.5 flex flex-col gap-3">
+        {/* Container da Foto 100% visível, SEM CORTES nem texto cobrindo os atletas */}
         <div
-          onClick={() => setIsLightboxOpen(true)}
-          className="relative w-full h-56 sm:h-72 md:h-80 rounded-2xl overflow-hidden bg-slate-950 cursor-pointer shadow-md group border border-surface-container-high/50"
-          title="Toque para ver em tela cheia com alta resolução"
+          onClick={() => {
+            setLightboxZoom(1);
+            setIsLightboxOpen(true);
+          }}
+          className="relative w-full rounded-2xl overflow-hidden bg-slate-950 cursor-pointer shadow-lg group border border-slate-800/80 flex items-center justify-center p-1 sm:p-2.5 transition-all hover:border-amber-400/50"
+          title="Toque para ver a foto completa sem cortes e com zoom"
         >
+          {/* Fundo com desfoque ambiente suave gerado a partir da própria foto */}
+          <div
+            className="absolute inset-0 bg-cover bg-center blur-2xl opacity-25 scale-110 pointer-events-none"
+            style={{ backgroundImage: `url(${coverTeam.photoUrl})` }}
+          />
+
+          {/* Foto oficial 100% visível, SEM CORTES, adaptada a qualquer proporção (retrato, paisagem, quadrada) */}
           <img
             src={coverTeam.photoUrl}
             alt={coverTeam.teamName}
-            className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300"
+            className="w-auto h-auto max-w-full max-h-[70vh] sm:max-h-[620px] object-contain relative z-10 transition-transform duration-300 group-hover:scale-[1.01] block mx-auto rounded-xl shadow-2xl"
           />
 
-          {/* Degradê na base da foto para contraste */}
-          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/20 to-transparent pointer-events-none" />
-
-          {/* Tag de Zoom no canto superior */}
-          <div className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-white text-[11px] font-bold flex items-center gap-1 shadow-sm opacity-90 group-hover:opacity-100 transition-opacity">
-            <span className="material-symbols-outlined text-[15px]">zoom_in</span>
-            <span>Ver Foto</span>
+          {/* Selos flutuantes superiores sutis (não cobrem ninguém) */}
+          <div className="absolute top-3 left-3 z-20 pointer-events-none">
+            <span className="px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-amber-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 border border-white/10 shadow-sm">
+              <span>🏆</span>
+              <span>Foto Oficial da Turma</span>
+            </span>
           </div>
 
-          {/* Informações sobrepostas na foto */}
-          <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-2">
-            <div className="text-white min-w-0 drop-shadow">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1">
-                <span>🏆</span>
-                <span>CAMPEÕES DA RODADA ANTERIOR • INSTAGRAM OFICIAL</span>
-              </span>
-              <h4 className="font-headline-sm text-base sm:text-xl font-black leading-tight text-white truncate">
+          <div className="absolute top-3 right-3 z-20">
+            <div className="px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md text-white text-[11px] font-bold flex items-center gap-1 shadow-sm border border-white/10 group-hover:bg-black/90 transition-colors">
+              <span className="material-symbols-outlined text-[15px] text-amber-400">zoom_in</span>
+              <span>Toque p/ Ampliar</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Bloco de Destaque da Equipe Campeã & Instagram Oficial (Abaixo da foto, sem encobrir ninguém) */}
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-surface-container-low border border-surface-container-high/60 flex flex-col gap-3 shadow-2xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <span>🏆</span>
+                  <span>CAMPEÕES DA RODADA ANTERIOR</span>
+                </span>
+                {formattedMatchDate && (
+                  <span className="text-[11px] font-semibold text-outline">
+                    Rodada de {formattedMatchDate}
+                  </span>
+                )}
+              </div>
+              <h4 className="font-headline-sm text-base sm:text-xl font-black text-navy-deep truncate mt-1">
                 {coverTeam.teamName}
               </h4>
             </div>
 
-            {coverTeam.instagramUrl && (
-              <a
-                href={coverTeam.instagramUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-95 text-white font-headline-sm text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-rose-900/40 shrink-0 active:scale-95 transition-all"
-              >
-                <InstagramIcon className="w-4 h-4" color="#ffffff" />
-                <span className="hidden sm:inline">Ver no Instagram</span>
-                <span className="sm:hidden">Instagram</span>
-              </a>
-            )}
+            {/* Link em destaque para o Instagram Oficial da Pelada */}
+            <a
+              href={coverTeam.instagramUrl || OFFICIAL_INSTAGRAM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-95 text-white font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-md shadow-rose-900/30 shrink-0 active:scale-95 transition-all"
+            >
+              <InstagramIcon className="w-4 h-4 sm:w-5 sm:h-5" color="#ffffff" />
+              <span>Ver no Instagram Oficial</span>
+              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </a>
           </div>
-        </div>
 
-        {/* Legenda Oficial */}
-        {coverTeam.caption && (
-          <p className="text-xs sm:text-sm text-navy-deep font-medium leading-relaxed bg-surface-container-low/70 p-3 rounded-xl border border-surface-container-high/40">
-            &ldquo;{coverTeam.caption}&rdquo;
-          </p>
-        )}
+          {/* Legenda Oficial */}
+          {coverTeam.caption && (
+            <p className="text-xs sm:text-sm text-navy-deep font-medium leading-relaxed bg-surface-container-lowest p-3 rounded-xl border border-surface-container-high/40">
+              &ldquo;{coverTeam.caption}&rdquo;
+            </p>
+          )}
+        </div>
 
         {/* Atletas do Time Campeão em Destaque */}
         {squadPlayers.length > 0 && (
@@ -1111,28 +1190,30 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
             <span>Compartilhar com a Turma</span>
           </button>
 
-          {coverTeam.instagramUrl ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => {
+                setLightboxZoom(1);
+                setIsLightboxOpen(true);
+              }}
+              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep font-label-md text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+            >
+              <span className="material-symbols-outlined text-[17px] text-amber-600">fullscreen</span>
+              <span>Tela Cheia</span>
+            </button>
+
             <a
-              href={coverTeam.instagramUrl}
+              href={coverTeam.instagramUrl || OFFICIAL_INSTAGRAM_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-95 text-white font-headline-sm text-xs font-bold flex items-center gap-2 shadow-sm shadow-rose-900/20 active:scale-95 transition-all"
             >
               <InstagramIcon className="w-4 h-4" color="#ffffff" />
-              <span>Curtir no Instagram Oficial</span>
+              <span>{OFFICIAL_INSTAGRAM_HANDLE}</span>
               <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
             </a>
-          ) : (
-            <a
-              href="https://www.instagram.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-surface-container-low hover:bg-surface-container text-outline hover:text-navy-deep font-label-md text-xs font-bold flex items-center gap-1.5 transition-all"
-            >
-              <InstagramIcon className="w-3.5 h-3.5" color="currentColor" />
-              <span>Instagram da Pelada</span>
-            </a>
-          )}
+          </div>
         </div>
       </div>
 

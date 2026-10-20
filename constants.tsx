@@ -13,3 +13,6 @@ export const MOCK_PLAYERS: Player[] = [];
 
 export const CURRENT_MATCH: Match | null = null;
 
+export const OFFICIAL_INSTAGRAM_URL = "https://www.instagram.com/pelada_ousadia_alegria?mdxt=MThqbXF3YWpmZW03dQ==";
+export const OFFICIAL_INSTAGRAM_HANDLE = "@pelada_ousadia_alegria";
+
