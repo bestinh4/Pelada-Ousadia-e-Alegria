@@ -596,7 +596,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {/* BOTÃO 1: ABRIR LISTA DA PRÓXIMA PELADA */}
             <button
               onClick={handleReleaseNextPelada}
@@ -605,10 +605,22 @@ const Dashboard: React.FC<DashboardProps> = ({
               title="Liberar lista da próxima pelada: confirma mensalistas automaticamente e penaliza quem faltou"
             >
               <span className="material-symbols-outlined text-[18px] shrink-0">rule_folder</span>
-              <span className="truncate">{isReleasingList ? 'LIBERANDO...' : 'ABRIR PRÓXIMA LISTA'}</span>
+              <span className="truncate">{isReleasingList ? 'LIBERANDO...' : 'ABRIR LISTA'}</span>
             </button>
 
-            {/* BOTÃO 2: HISTÓRICO DE PELADAS ENCERRADAS */}
+            {/* BOTÃO 2: TIME DA SEMANA (FOTO OFICIAL & INSTAGRAM) */}
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('oa_open_cover_modal'));
+              }}
+              className="min-h-[44px] py-2.5 px-3 bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-95 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+              title="Publicar ou editar a foto do Time da Semana da rodada anterior"
+            >
+              <span className="material-symbols-outlined text-[18px] shrink-0">photo_library</span>
+              <span className="truncate">TIME DA SEMANA</span>
+            </button>
+
+            {/* BOTÃO 3: HISTÓRICO DE PELADAS ENCERRADAS */}
             <button
               onClick={() => {
                 localStorage.setItem('oa_open_history_tab', 'true');
@@ -618,27 +630,27 @@ const Dashboard: React.FC<DashboardProps> = ({
               title="Procurar peladas encerradas no histórico e fazer alterações de presença ou multas"
             >
               <span className="material-symbols-outlined text-[18px] shrink-0">history</span>
-              <span className="truncate">HISTÓRICO DE PELADAS</span>
+              <span className="truncate">HISTÓRICO</span>
             </button>
 
-            {/* BOTÃO 3: CADASTRAR NOVO ATLETA */}
+            {/* BOTÃO 4: CADASTRAR NOVO ATLETA */}
             <button
               onClick={() => setIsAddingManual(true)}
               className="min-h-[44px] py-2.5 px-3 bg-gradient-to-r from-primary-container to-primary-bright hover:opacity-95 text-on-primary rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
               title="Cadastrar novo atleta manualmente no sistema"
             >
               <span className="material-symbols-outlined text-[18px] shrink-0">person_add</span>
-              <span className="truncate">CADASTRAR ATLETA</span>
+              <span className="truncate">NOVO ATLETA</span>
             </button>
 
-            {/* BOTÃO 4: DEFINIR VALORES (AVULSO, MENSALISTA E MULTA) */}
+            {/* BOTÃO 5: DEFINIR VALORES (AVULSO, MENSALISTA E MULTA) */}
             <button
               onClick={() => {
                 setPriceForm(prices);
                 setPixForm(pixConfig);
                 setIsEditingPrices(true);
               }}
-              className="min-h-[44px] py-2.5 px-3 bg-navy-deep hover:opacity-95 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+              className="col-span-2 sm:col-span-1 min-h-[44px] py-2.5 px-3 bg-navy-deep hover:opacity-95 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
               title="Definir valores de Avulsos, Mensalistas, Multas e Chave Pix"
             >
               <PixIcon className="w-4 h-4" color="#32BCAD" />

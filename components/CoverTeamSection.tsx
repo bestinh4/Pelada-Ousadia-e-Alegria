@@ -97,10 +97,11 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
     playerIds: [] as string[],
     highlightPlayer: ''
   });
-  const [photoMode, setPhotoMode] = useState<'upload' | 'url'>('upload');
+  const [photoMode, setPhotoMode] = useState<'gallery' | 'camera' | 'url'>('gallery');
   const [availableTeamsFromSession, setAvailableTeamsFromSession] = useState<any[]>([]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const isMaster = user?.email === MASTER_ADMIN_EMAIL;
   const isAdmin = isMaster || currentUserRole === 'admin';
@@ -166,7 +167,13 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         handleOpenEditModal(prefilledTeam);
       }
     } catch {}
-  }, [isAdmin]);
+
+    const handleCustomEvent = (e: any) => {
+      if (isAdmin) handleOpenEditModal(e?.detail);
+    };
+    window.addEventListener('oa_open_cover_modal', handleCustomEvent);
+    return () => window.removeEventListener('oa_open_cover_modal', handleCustomEvent);
+  }, [isAdmin, coverTeam]);
 
   const handleOpenEditModal = (prefilledTeam?: any) => {
     loadSessionTeams();
@@ -225,7 +232,8 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
       alert("Erro ao processar imagem. Tente novamente.");
     } finally {
       setIsCompressing(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (galleryInputRef.current) galleryInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
     }
   };
 
@@ -392,14 +400,14 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-label-md text-[10px] font-black uppercase tracking-wider">
-                Novidade
+                DESTAQUE
               </span>
               <h3 className="font-headline-sm text-sm sm:text-base font-bold text-white">
-                Time Capa da Semana (Instagram)
+                Time da Semana (Rodada Anterior)
               </h3>
             </div>
             <p className="text-xs text-white/80 mt-1 leading-relaxed">
-              Tirou a foto da equipe vencedora no fim da pelada? Publique a foto aqui para ficar em destaque no app e linkar com o post do Instagram!
+              Exiba a foto do time campeão da rodada anterior! Faça o upload direto da galeria do celular ou cole uma URL, com link para o Instagram oficial da pelada.
             </p>
           </div>
         </div>
@@ -409,8 +417,8 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
           onClick={handleOpenEditModal}
           className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-amber-500/25 active:scale-95 transition-all shrink-0 cursor-pointer"
         >
-          <span className="material-symbols-outlined text-[18px]">add_a_photo</span>
-          <span>Publicar Time Capa</span>
+          <span className="material-symbols-outlined text-[18px]">photo_library</span>
+          <span>Definir Time da Semana</span>
         </button>
 
         {isModalOpen && renderModal()}
@@ -457,9 +465,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
               </div>
               <div>
                 <h3 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold">
-                  {coverTeam ? 'Editar Time Capa da Semana' : 'Publicar Time Capa da Semana'}
+                  {coverTeam ? 'Editar Time da Semana (Rodada Anterior)' : 'Publicar Time da Semana (Rodada Anterior)'}
                 </h3>
-                <p className="text-[11px] text-outline">Destaque oficial da equipe no app e no Instagram</p>
+                <p className="text-[11px] text-outline">Destaque oficial da equipe campeã no app e no Instagram</p>
               </div>
             </div>
             <button
@@ -481,36 +489,81 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                 <span className="text-[10px] text-outline font-semibold">Tirada no final da pelada</span>
               </label>
 
-              {/* Botões de Escolha: Câmera/Galeria ou URL */}
-              <div className="flex items-center gap-2">
+              {/* Botões de Escolha: Galeria, Câmera ou URL */}
+              <div className="grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setPhotoMode('upload')}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all border ${
-                    photoMode === 'upload'
-                      ? 'bg-navy-deep text-white border-navy-deep'
-                      : 'bg-surface-container text-outline border-transparent'
+                  onClick={() => setPhotoMode('gallery')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all border flex flex-col sm:flex-row items-center justify-center gap-1 text-center ${
+                    photoMode === 'gallery'
+                      ? 'bg-navy-deep text-white border-navy-deep shadow-xs'
+                      : 'bg-surface-container text-outline hover:text-navy-deep border-transparent'
                   }`}
                 >
-                  📸 Câmera ou Galeria do Celular
+                  <span className="material-symbols-outlined text-[17px]">photo_library</span>
+                  <span>Galeria</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotoMode('camera')}
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all border flex flex-col sm:flex-row items-center justify-center gap-1 text-center ${
+                    photoMode === 'camera'
+                      ? 'bg-navy-deep text-white border-navy-deep shadow-xs'
+                      : 'bg-surface-container text-outline hover:text-navy-deep border-transparent'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[17px]">photo_camera</span>
+                  <span>Câmera</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPhotoMode('url')}
-                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all border ${
+                  className={`py-2 px-2 rounded-xl text-xs font-bold transition-all border flex flex-col sm:flex-row items-center justify-center gap-1 text-center ${
                     photoMode === 'url'
-                      ? 'bg-navy-deep text-white border-navy-deep'
-                      : 'bg-surface-container text-outline border-transparent'
+                      ? 'bg-navy-deep text-white border-navy-deep shadow-xs'
+                      : 'bg-surface-container text-outline hover:text-navy-deep border-transparent'
                   }`}
                 >
-                  🔗 Link da Imagem
+                  <span className="material-symbols-outlined text-[17px]">link</span>
+                  <span>URL Imagem</span>
                 </button>
               </div>
 
-              {photoMode === 'upload' ? (
+              {photoMode === 'gallery' ? (
                 <div>
                   <input
-                    ref={fileInputRef}
+                    ref={galleryInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => galleryInputRef.current?.click()}
+                    disabled={isCompressing}
+                    className="w-full min-h-[52px] py-3 px-4 rounded-xl border-2 border-dashed border-primary-container/50 hover:border-primary-container bg-surface-container-low hover:bg-surface-container text-navy-deep font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 active:scale-98 transition-all"
+                  >
+                    {isCompressing ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-primary-container border-t-transparent rounded-full animate-spin" />
+                        <span>Otimizando foto da galeria...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[22px] text-primary-container">photo_library</span>
+                        <span>{formData.photoUrl ? 'Escolher Outra Foto da Galeria' : 'Escolher Foto da Galeria do Celular'}</span>
+                      </>
+                    )}
+                  </button>
+                  <p className="text-[11px] text-outline mt-1 text-center">
+                    Abre suas fotos/álbuns do celular com otimização automática para o app.
+                  </p>
+                </div>
+              ) : photoMode === 'camera' ? (
+                <div>
+                  <input
+                    ref={cameraInputRef}
                     type="file"
                     accept="image/*"
                     capture="environment"
@@ -519,32 +572,38 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                   />
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => cameraInputRef.current?.click()}
                     disabled={isCompressing}
-                    className="w-full min-h-[50px] py-3 px-4 rounded-xl border-2 border-dashed border-primary-container/40 hover:border-primary-container bg-surface-container-low hover:bg-surface-container text-navy-deep font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 active:scale-98 transition-all"
+                    className="w-full min-h-[52px] py-3 px-4 rounded-xl border-2 border-dashed border-amber-500/50 hover:border-amber-600 bg-amber-50/50 hover:bg-amber-50 text-amber-950 font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 active:scale-98 transition-all"
                   >
                     {isCompressing ? (
                       <>
-                        <span className="w-4 h-4 border-2 border-primary-container border-t-transparent rounded-full animate-spin" />
-                        <span>Otimizando foto...</span>
+                        <span className="w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" />
+                        <span>Processando captura...</span>
                       </>
                     ) : (
                       <>
-                        <span className="material-symbols-outlined text-[22px] text-primary-container">add_a_photo</span>
-                        <span>{formData.photoUrl ? 'Trocar Foto da Câmera / Galeria' : 'Tirar Foto ou Escolher da Galeria'}</span>
+                        <span className="material-symbols-outlined text-[22px] text-amber-600">photo_camera</span>
+                        <span>{formData.photoUrl ? 'Tirar Outra Foto com a Câmera' : 'Abrir Câmera e Tirar Foto'}</span>
                       </>
                     )}
                   </button>
+                  <p className="text-[11px] text-outline mt-1 text-center">
+                    Tira a foto da equipe no fim da pelada instantaneamente.
+                  </p>
                 </div>
               ) : (
-                <div>
+                <div className="space-y-1">
                   <input
                     type="url"
-                    placeholder="https://exemplo.com/foto-do-time.jpg"
+                    placeholder="https://exemplo.com/foto-time-da-semana.jpg ou URL do Firestore"
                     value={formData.photoUrl}
                     onChange={(e) => setFormData({ ...formData, photoUrl: e.target.value })}
                     className="w-full h-11 px-3 rounded-xl bg-surface-container-low border border-surface-container-high outline-none text-xs text-navy-deep font-semibold"
                   />
+                  <p className="text-[11px] text-outline">
+                    Cole o link direto da imagem hospedada no Firestore, Cloud Storage ou web.
+                  </p>
                 </div>
               )}
 
@@ -909,7 +968,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-label-md text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
                 <span>⭐</span>
-                <span>TIME CAPA DA SEMANA</span>
+                <span>TIME DA SEMANA • RODADA ANTERIOR</span>
               </span>
               {formattedMatchDate && (
                 <span className="text-[11px] font-semibold text-outline">
@@ -943,10 +1002,10 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
               type="button"
               onClick={handleOpenEditModal}
               className="px-3 py-1.5 rounded-xl bg-navy-deep hover:bg-slate-900 text-white font-headline-sm text-xs font-bold flex items-center gap-1 shadow-xs active:scale-95 transition-all"
-              title="Trocar a foto ou editar informações do Time Capa"
+              title="Trocar a foto ou editar informações do Time da Semana"
             >
               <span className="material-symbols-outlined text-[16px]">edit</span>
-              <span>Editar Capa</span>
+              <span>Editar Time</span>
             </button>
           )}
         </div>
@@ -979,7 +1038,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
             <div className="text-white min-w-0 drop-shadow">
               <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1">
                 <span>🏆</span>
-                <span>CAMPEÕES DO DIA • BONFIM DA PELADA</span>
+                <span>CAMPEÕES DA RODADA ANTERIOR • INSTAGRAM OFICIAL</span>
               </span>
               <h4 className="font-headline-sm text-base sm:text-xl font-black leading-tight text-white truncate">
                 {coverTeam.teamName}
