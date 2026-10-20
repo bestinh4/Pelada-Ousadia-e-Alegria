@@ -10,6 +10,7 @@ import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
 import { getCurrentMonthKey, getMonthName, getMensalistaPaymentInfo, MENSALISTA_DUE_DAY } from '../utils/mensalistaUtils.ts';
 import { playSound, playWhistleSound } from '../utils/sound.ts';
 import { PWAInstallButton } from '../components/PWAInstallButton.tsx';
+import { CoverTeamSection } from '../components/CoverTeamSection.tsx';
 
 interface DashboardProps {
   match: Match | null;
@@ -1062,6 +1063,13 @@ const Dashboard: React.FC<DashboardProps> = ({
           )}
         </div>
       </div>
+
+      {/* TIME CAPA DA SEMANA (FOTO OFICIAL PÓS-PELADA & DESTAQUE NO INSTAGRAM) */}
+      <CoverTeamSection
+        players={players}
+        user={user}
+        currentUserRole={currentUserRole}
+      />
 
       {/* MODAL DE PAGAMENTO PIX & VERIFICAÇÃO AUTOMÁTICA DE COMPROVANTE */}
       {currentPlayer && (

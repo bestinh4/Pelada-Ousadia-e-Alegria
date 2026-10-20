@@ -143,3 +143,24 @@ export enum Page {
   TeamBalancing = 'team-balancing',
   ArenaPanel = 'arena-panel'
 }
+
+export interface CoverTeam {
+  id?: string;
+  teamName: string;
+  photoUrl: string;
+  matchDate?: string;
+  editionTitle?: string;
+  caption?: string;
+  instagramUrl?: string;
+  playerIds?: string[];
+  playerNames?: string[];
+  stats?: {
+    wins?: number;
+    goals?: number;
+    champion?: boolean;
+  };
+  highlightPlayer?: string;
+  createdAt: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
