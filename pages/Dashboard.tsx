@@ -401,7 +401,9 @@ const Dashboard: React.FC<DashboardProps> = ({
       });
 
       if (peladaModalMode === 'new_list') {
-        // Atualizar todos os atletas para a nova pelada com status 'pendente' (Regra oficial: mensalistas e avulsos devem confirmar na lista)
+        // REGRA OFICIAL DA PELADA:
+        // Assim que o ADM liberar a nova pelada, TODO MENSALISTA tem de estar CONFIRMADO (status 'presente') com presença garantida!
+        // Os atletas avulsos ficam com status 'pendente' aguardando confirmação individual na lista.
         const promises = players.map(async (p) => {
           const isMensal = p.playerType === 'mensalista';
           // Se o avulso já efetuou pagamento recente ou com comprovante para esta data/pelada, preservar como PAGO!
@@ -411,8 +413,8 @@ const Dashboard: React.FC<DashboardProps> = ({
              (p.lastPaymentAt && (Date.now() - new Date(p.lastPaymentAt).getTime() < 36 * 60 * 60 * 1000)));
 
           return updateDoc(doc(db, "players", p.id), {
-            status: 'pendente',
-            confirmedAt: null,
+            status: isMensal ? 'presente' : 'pendente',
+            confirmedAt: isMensal ? now : null,
             courtCheckIn: false,
             paymentStatus: isMensal 
               ? (p.paymentStatus || 'pendente') 
@@ -433,7 +435,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           playWhistleSound('start');
           await broadcastNotification(
             "⚽ NOVA PELADA ABERTA!",
-            `Lista liberada para ${formattedDateBr} às ${cleanTime} (${cleanLocation})! Confirme sua vaga na lista pelo App.`,
+            `Lista liberada para ${formattedDateBr} às ${cleanTime} (${cleanLocation})! Mensalistas já estão confirmados automaticamente. Avulsos, confirmem suas vagas no App!`,
             user?.uid,
             'all',
             'start'
@@ -441,7 +443,8 @@ const Dashboard: React.FC<DashboardProps> = ({
         } catch {}
 
         setIsOpenPeladaModal(false);
-        alert(`✅ Nova pelada aberta para ${formattedDateBr} às ${cleanTime}!\n\nA lista foi liberada com status "Pendente" para todos os atletas confirmarem presença.`);
+        const totalMensalistas = players.filter(p => p.playerType === 'mensalista').length;
+        alert(`✅ Nova pelada aberta para ${formattedDateBr} às ${cleanTime}!\n\nRegra oficial da pelada aplicada:\n⭐ Todos os ${totalMensalistas} mensalistas foram confirmados automaticamente na lista com presença garantida!\n⚽ Os atletas avulsos estão com status "Pendente" para confirmar vaga.`);
       } else {
         setIsOpenPeladaModal(false);
         alert(`✅ Data e horário da pelada atualizados para ${formattedDateBr} às ${cleanTime}!`);
@@ -602,7 +605,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               onClick={handleReleaseNextPelada}
               disabled={isReleasingList}
               className="min-h-[44px] py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all disabled:opacity-50"
-              title="Liberar lista da próxima pelada: confirma mensalistas automaticamente e penaliza quem faltou"
+              title="Liberar lista da próxima pelada: confirma todos os mensalistas automaticamente com presença garantida"
             >
               <span className="material-symbols-outlined text-[18px] shrink-0">rule_folder</span>
               <span className="truncate">{isReleasingList ? 'LIBERANDO...' : 'ABRIR LISTA'}</span>
@@ -1263,8 +1266,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                           : 'a data escolhida'}
                       </strong>.
                     </li>
+                    <li className="font-bold text-emerald-950">
+                      ⭐ <strong>Mensalistas:</strong> Todo mensalista fica automaticamente <strong>confirmado</strong> na lista (status &quot;Presente&quot;) com vaga garantida.
+                    </li>
                     <li>
-                      Todos os atletas (mensalistas e avulsos) ficarão com status <strong>&quot;Pendente&quot;</strong> para confirmar presença na lista.
+                      ⚽ <strong>Avulsos:</strong> Ficam com status <strong>&quot;Pendente&quot;</strong> para confirmar presença e disputar as vagas restantes na lista.
                     </li>
                     <li className="font-semibold text-emerald-950">
                       ⚖️ Regra oficial de multas: apenas o atleta que confirma o nome na lista e não comparece (sem retirar antes das 18h da véspera) será multado. Quem não colocou o nome ou retirou antes das 18h não será multado.
