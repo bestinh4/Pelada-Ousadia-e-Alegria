@@ -77,6 +77,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   const [isRemanageModalOpen, setIsRemanageModalOpen] = useState(false);
   const [isAddPlayerModalOpen, setIsAddPlayerModalOpen] = useState(false);
   const [targetTeamForAdd, setTargetTeamForAdd] = useState<string | null>(null);
+  const [sessionSubView, setSessionSubView] = useState<'teams' | 'roster'>('teams');
 
   // Estados para Encerramento Oficial da Pelada (Apuração de Participação, Faltas e Multas)
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
@@ -1480,11 +1481,12 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   };
 
   // Adicionar atleta avulso ou reserva diretamente a um time
-  const handleAddPlayerToTeam = async (playerId: string) => {
-    if (!session || !isAdm || !targetTeamForAdd) return;
+  const handleAddPlayerToTeam = async (playerId: string, overrideTargetTeamId?: string) => {
+    const effectiveTeamId = overrideTargetTeamId || targetTeamForAdd;
+    if (!session || !isAdm || !effectiveTeamId) return;
 
     const movingPlayer = players.find(p => p.id === playerId);
-    const targetTeam = session.teams.find(t => t.id === targetTeamForAdd);
+    const targetTeam = session.teams.find(t => t.id === effectiveTeamId);
 
     if (targetTeam && movingPlayer) {
       const isGK = movingPlayer.position === 'Goleiro';
@@ -1513,7 +1515,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
     try {
       const updatedTeams = session.teams.map(t => {
-        if (t.id === targetTeamForAdd) {
+        if (t.id === effectiveTeamId) {
           if (t.playerIds.includes(playerId)) return t;
           return { ...t, playerIds: sortTeamPlayerIds([...t.playerIds, playerId]) };
         }
@@ -1673,17 +1675,13 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       text += `\n`;
     });
 
-    if (session.reserves && session.reserves.length > 0) {
-      const reserveNames = session.reserves
-        .map(pid => players.find(p => p.id === pid))
-        .filter(Boolean)
-        .map(p => `${p?.name} (${p?.position === 'Goleiro' ? 'GK' : p?.position})`);
+    if (reserveAthletes.length > 0) {
+      const reserveNames = reserveAthletes
+        .map(p => `${p.name} (${p.position === 'Goleiro' ? 'GK' : p.position})`);
       
-      if (reserveNames.length > 0) {
-        text += `━━━━━━━━━━━━━━━━━━━━━\n`;
-        text += `⏳ *SUPLENTES / RESERVAS (${reserveNames.length}):*\n`;
-        text += `${reserveNames.join(', ')}\n\n`;
-      }
+      text += `━━━━━━━━━━━━━━━━━━━━━\n`;
+      text += `⏳ *SUPLENTES & CONFIRMADOS PÓS-SORTEIO (${reserveNames.length}):*\n`;
+      text += `${reserveNames.join(', ')}\n\n`;
     }
 
     text += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -1701,7 +1699,15 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
   // Lista de atletas que NÃO estão em nenhum time sorteado ainda
   const allAssignedPlayerIds = new Set(session?.teams.flatMap(t => t.playerIds) || []);
   const availablePlayersToAdd = players.filter(p => !allAssignedPlayerIds.has(p.id));
-  const reserveAthletes = (session?.reserves || [])
+
+  // Atletas confirmados (presentes) que ainda não estão escalados em nenhuma equipe (ex: confirmaram pós-sorteio ou reservas)
+  const unassignedConfirmedAthletes = players.filter(p => p.status === 'presente' && !allAssignedPlayerIds.has(p.id));
+
+  // Todos os suplentes e reservas da pelada (unindo reservas da sessão + atletas confirmados pós-sorteio)
+  const reserveAthletes = Array.from(new Set([
+    ...(session?.reserves || []),
+    ...unassignedConfirmedAthletes.map(p => p.id)
+  ]))
     .map(id => players.find(p => p.id === id))
     .filter(Boolean) as Player[];
 
@@ -2415,8 +2421,44 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                 )}
               </div>
 
-              {/* PAINEL DE CONTROLE DO JOGO, RODÍZIO & ENCERRAMENTO OFICIAL DA PELADA */}
-              {(() => {
+              {/* SUB-ABA: EQUIPES SORTEADAS vs LISTA GERAL DE CONFIRMADOS */}
+              <div className="flex items-center gap-1.5 p-1.5 bg-surface-container-low rounded-2xl border border-surface-container-high/40">
+                <button
+                  type="button"
+                  onClick={() => setSessionSubView('teams')}
+                  className={`flex-1 min-h-[42px] py-2 px-3 rounded-xl font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+                    sessionSubView === 'teams'
+                      ? 'bg-navy-deep text-white shadow-xs'
+                      : 'text-outline hover:text-navy-deep hover:bg-surface-container'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">groups</span>
+                  <span>Equipes Sorteadas ({session.teams.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSessionSubView('roster')}
+                  className={`flex-1 min-h-[42px] py-2 px-3 rounded-xl font-headline-sm text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+                    sessionSubView === 'roster'
+                      ? 'bg-navy-deep text-white shadow-xs'
+                      : 'text-outline hover:text-navy-deep hover:bg-surface-container'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">format_list_numbered</span>
+                  <span>Lista Geral de Confirmados ({confirmedPlayers.length})</span>
+                  {reserveAthletes.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white animate-pulse">
+                      +{reserveAthletes.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {sessionSubView === 'teams' ? (
+                <>
+                  {/* PAINEL DE CONTROLE DO JOGO, RODÍZIO & ENCERRAMENTO OFICIAL DA PELADA */}
+                  {(() => {
                 const curAId = session?.activeMatch?.teamAId || session?.teams[0]?.id;
                 const curBId = session?.activeMatch?.teamBId || session?.teams[1]?.id;
                 const teamA = session?.teams.find(t => t.id === curAId) || session?.teams[0];
@@ -2979,6 +3021,11 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                                           <span className="text-[10px] font-semibold text-outline">
                                             {p?.position || 'Linha'}
                                           </span>
+                                          {p?.status === 'ausente' && (
+                                            <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-bold">
+                                              ⚠️ Desistiu / Ausente
+                                            </span>
+                                          )}
                                           {isAdm && session.status === 'finished' && session.summary && (
                                             session.summary.participatedIds?.includes(pid) ? (
                                               <span className="text-[10px] font-bold text-emerald-700">
@@ -3052,15 +3099,15 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
               {/* ATLETAS SUPLENTES / RESERVAS DA PELADA (SE HOUVER) */}
               {reserveAthletes.length > 0 && (
                 <div className="bg-surface-container-lowest rounded-2xl border border-surface-container-high/40 shadow-xs p-4 flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <span className="material-symbols-outlined text-amber-600 text-[22px]">hourglass_empty</span>
                       <h4 className="font-headline-sm text-sm text-navy-deep font-bold">
-                        Suplentes / Reservas da Pelada ({reserveAthletes.length})
+                        Suplentes & Confirmados Pós-Sorteio ({reserveAthletes.length})
                       </h4>
                     </div>
                     <span className="text-[11px] text-outline font-medium">
-                      Atletas excedentes prontos para assumir desfalques
+                      Atletas que confirmaram após o sorteio ou reservas prontos para assumir vagas
                     </span>
                   </div>
 
@@ -3082,7 +3129,12 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                             />
                             <div className="min-w-0">
                               <p className="font-headline-sm text-xs text-navy-deep font-bold truncate">{res.name}</p>
-                              <span className="text-[10px] text-outline uppercase font-semibold">{res.position}</span>
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="text-[10px] text-outline uppercase font-semibold">{res.position}</span>
+                                <span className="text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                                  Pós-Sorteio
+                                </span>
+                              </div>
                             </div>
                           </div>
 
@@ -3107,8 +3159,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                                 value=""
                                 onChange={(e) => {
                                   if (e.target.value) {
-                                    setTargetTeamForAdd(e.target.value);
-                                    handleAddPlayerToTeam(res.id);
+                                    handleAddPlayerToTeam(res.id, e.target.value);
                                   }
                                 }}
                                 className="h-7 px-1.5 bg-primary-container text-on-primary rounded-lg text-[10px] font-bold outline-none cursor-pointer"
@@ -3117,6 +3168,143 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                                 {session.teams.map(t => (
                                   <option key={t.id} value={t.id}>{t.name}</option>
                                 ))}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+                </>
+              ) : (
+                /* LISTA GERAL DE CONFIRMADOS (ROSTER COMPLETO DA PELADA) */
+                <div className="bg-surface-container-lowest rounded-2xl border border-surface-container-high/40 shadow-xs p-4 sm:p-5 flex flex-col gap-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-surface-container-high/50">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-10 h-10 rounded-xl bg-navy-deep text-white flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined text-[22px]">format_list_numbered</span>
+                      </div>
+                      <div>
+                        <h3 className="font-headline-sm text-sm sm:text-base text-navy-deep font-bold">
+                          Lista Geral de Atletas Confirmados ({confirmedPlayers.length})
+                        </h3>
+                        <p className="text-xs text-outline">
+                          Todos os atletas confirmados para a rodada e suas respectivas equipes ou status de suplência.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-bold">
+                        <span>Escalados: {allAssignedPlayerIds.size}</span>
+                      </div>
+                      {reserveAthletes.length > 0 && (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold">
+                          <span>Suplentes / Pós-Sorteio: {reserveAthletes.length}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {reserveAthletes.length > 0 && (
+                    <div className="p-3 bg-amber-50/80 border border-amber-300/80 rounded-xl flex items-start gap-2.5 text-xs text-amber-950">
+                      <span className="material-symbols-outlined text-amber-600 text-[20px] shrink-0 mt-0.5">info</span>
+                      <div className="flex-1">
+                        <span className="font-bold">Atletas Confirmados Pós-Sorteio ou Suplentes:</span>
+                        <p className="mt-0.5 text-amber-900">
+                          Os atletas marcados com <span className="font-bold bg-amber-200/80 px-1 py-0.5 rounded text-amber-950">⏳ Pós-Sorteio / Suplente</span> confirmaram presença após a divisão das equipes ou aguardam vaga. Como Administrador, você pode incluí-los em qualquer equipe incompleta usando o menu de seleção ao lado de seus nomes.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                    {confirmedPlayers.map((player, idx) => {
+                      const assignedTeam = session.teams.find(t => t.playerIds.includes(player.id));
+                      const isUnassigned = !assignedTeam;
+                      const isCheckedIn = !!session.courtPresence?.[player.id];
+                      const sectorBadge = getSectorBadgeStyle(player.position);
+
+                      return (
+                        <div 
+                          key={player.id}
+                          className={`p-3 rounded-xl border flex flex-col gap-2 transition-all ${
+                            isUnassigned 
+                              ? 'bg-amber-50/50 border-amber-400/60 shadow-xs' 
+                              : isCheckedIn
+                                ? 'bg-emerald-50/40 border-emerald-500/30'
+                                : 'bg-surface-container-low border-surface-container-high/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-5 text-[11px] font-bold text-outline text-center shrink-0">
+                                {idx + 1}.
+                              </span>
+                              <img 
+                                src={player.photoUrl} 
+                                alt={player.name}
+                                className="w-9 h-9 rounded-full object-cover shrink-0 border border-surface-container-high"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="min-w-0">
+                                <p className="font-headline-sm text-xs font-bold text-navy-deep truncate">
+                                  {player.name}
+                                </p>
+                                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${sectorBadge.badgeClass}`}>
+                                    {player.position}
+                                  </span>
+                                  <span className="text-[9px] font-semibold px-1 py-0.2 rounded bg-surface-container text-navy-deep">
+                                    {player.playerType === 'mensalista' ? 'Mensalista' : 'Avulso'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-1 pt-1.5 border-t border-surface-container-high/40">
+                            {assignedTeam ? (
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                                <span className="font-headline-sm text-xs font-bold text-navy-deep truncate">
+                                  {assignedTeam.name}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                                ⏳ Pós-Sorteio / Suplente
+                              </span>
+                            )}
+
+                            {isAdm && (
+                              <select
+                                value={assignedTeam?.id || ""}
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    if (isUnassigned) {
+                                      handleAddPlayerToTeam(player.id, e.target.value);
+                                    } else if (assignedTeam && e.target.value !== assignedTeam.id) {
+                                      handleQuickMovePlayerToTeam(player.id, assignedTeam.id, e.target.value);
+                                    }
+                                  }
+                                }}
+                                className="h-7 px-2 bg-primary-container text-on-primary rounded-lg text-[10px] font-bold outline-none cursor-pointer max-w-[125px]"
+                              >
+                                {isUnassigned ? (
+                                  <option value="">Colocar no time...</option>
+                                ) : (
+                                  <option value={assignedTeam.id}>Equipe: {assignedTeam.name}</option>
+                                )}
+                                {session.teams
+                                  .filter(t => t.id !== assignedTeam?.id)
+                                  .map(t => (
+                                    <option key={t.id} value={t.id}>
+                                      Mudar para {t.name}
+                                    </option>
+                                  ))}
                               </select>
                             )}
                           </div>

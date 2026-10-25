@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, Player, Page, PixConfig } from '../types.ts';
-import { db, doc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query, where, orderBy, limit } from '../services/firebase.ts';
+import { db, doc, getDoc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query, where, orderBy, limit } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
@@ -293,6 +293,36 @@ const Dashboard: React.FC<DashboardProps> = ({
       await setDoc(doc(db, "players", targetId), updates, { merge: true });
       if (targetId !== user.uid) {
         await setDoc(doc(db, "players", user.uid), updates, { merge: true }).catch(() => {});
+      }
+
+      // Sincronizar com a sessão ativa de equipes (se o sorteio já tiver sido realizado)
+      try {
+        const sessionSnap = await getDoc(doc(db, "sessions", "current"));
+        if (sessionSnap.exists()) {
+          const sData = sessionSnap.data();
+          if (Array.isArray(sData?.teams) && sData.teams.length > 0) {
+            const allAssignedIds = new Set(sData.teams.flatMap((t: any) => t.playerIds || []));
+            const curReserves: string[] = Array.isArray(sData.reserves) ? sData.reserves : [];
+
+            if (newStatus === 'presente') {
+              // Se o atleta confirmou após o sorteio e não está em nenhum time, adiciona aos reservas da sessão
+              if (!allAssignedIds.has(targetId) && !curReserves.includes(targetId)) {
+                await updateDoc(doc(db, "sessions", "current"), {
+                  reserves: [...curReserves, targetId]
+                });
+              }
+            } else if (newStatus === 'ausente') {
+              // Se marcou ausência, retira dos reservas caso estivesse aguardando
+              if (curReserves.includes(targetId)) {
+                await updateDoc(doc(db, "sessions", "current"), {
+                  reserves: curReserves.filter(id => id !== targetId)
+                });
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Erro ao sincronizar reserva na sessão ativa:", err);
       }
     } catch (e) {
       alert("Erro ao atualizar presença.");
