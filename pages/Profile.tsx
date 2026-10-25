@@ -26,7 +26,7 @@ const Profile: React.FC<{
   useEffect(() => {
     if (player) {
       setEditedName(player.name || '');
-      setEditedPosition(player.position || 'Atacante');
+      setEditedPosition(player.position || 'Zagueiro');
       setEditedPlayerType(player.playerType || 'avulso');
     }
   }, [player?.id, player?.name, player?.position, player?.playerType]);
@@ -274,6 +274,22 @@ const Profile: React.FC<{
                         localStorage.setItem('oa_preview_user', JSON.stringify(parsed));
                       } catch {}
                     }
+
+                    // 4. Atualizar cache local de atletas para refletir a nova posição imediatamente
+                    try {
+                      const cached = localStorage.getItem('oa_real_players_cache');
+                      if (cached) {
+                        const parsed = JSON.parse(cached);
+                        if (Array.isArray(parsed)) {
+                          const updatedList = parsed.map((p: any) => 
+                            (p.id === targetId || p.id === currentUser?.uid) 
+                              ? { ...p, name: editedName.trim(), position: editedPosition, playerType: editedPlayerType } 
+                              : p
+                          );
+                          localStorage.setItem('oa_real_players_cache', JSON.stringify(updatedList));
+                        }
+                      }
+                    } catch {}
 
                     alert("Perfil atualizado com sucesso!");
                   } catch (err) {

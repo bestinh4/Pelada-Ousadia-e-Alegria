@@ -312,10 +312,36 @@ const Dashboard: React.FC<DashboardProps> = ({
                 });
               }
             } else if (newStatus === 'ausente') {
-              // Se marcou ausência, retira dos reservas caso estivesse aguardando
+              // Se marcou ausência / desistência, retira dos reservas e das equipes sorteadas
+              let sessionNeedsUpdate = false;
+              let updatedReserves = curReserves;
               if (curReserves.includes(targetId)) {
+                updatedReserves = curReserves.filter(id => id !== targetId);
+                sessionNeedsUpdate = true;
+              }
+
+              // Se o atleta estava escalado em alguma das equipes sorteadas, retira-o imediatamente do time
+              let updatedTeams = sData.teams;
+              const isAssigned = sData.teams.some((t: any) => Array.isArray(t.playerIds) && t.playerIds.includes(targetId));
+              if (isAssigned) {
+                updatedTeams = sData.teams.map((t: any) => {
+                  if (Array.isArray(t.playerIds) && t.playerIds.includes(targetId)) {
+                    const newIds = t.playerIds.filter((id: string) => id !== targetId);
+                    return {
+                      ...t,
+                      playerIds: newIds,
+                      isIncomplete: newIds.length < 6
+                    };
+                  }
+                  return t;
+                });
+                sessionNeedsUpdate = true;
+              }
+
+              if (sessionNeedsUpdate) {
                 await updateDoc(doc(db, "sessions", "current"), {
-                  reserves: curReserves.filter(id => id !== targetId)
+                  reserves: updatedReserves,
+                  teams: updatedTeams
                 });
               }
             }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Player, Page, Match } from '../types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
-import { db, doc, updateDoc, deleteDoc, collection, addDoc } from '../services/firebase.ts';
+import { db, doc, updateDoc, deleteDoc, collection, addDoc, getDoc } from '../services/firebase.ts';
 
 interface PlayerListProps {
   players: Player[];
@@ -272,6 +272,31 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
         suplenteNextMatch: statsData.suplenteNextMatch,
         confirmedAt: isNowPresent ? (selectedPlayerForStats.confirmedAt || new Date().toISOString()) : null
       });
+
+      // Se o status for alterado para ausente, retirar imediatamente das equipes sorteadas e reservas
+      if (statsData.status === 'ausente') {
+        try {
+          const sSnap = await getDoc(doc(db, "sessions", "current"));
+          if (sSnap.exists()) {
+            const sData = sSnap.data();
+            const curRes = Array.isArray(sData.reserves) ? sData.reserves : [];
+            const isAssigned = sData.teams?.some((t: any) => t.playerIds?.includes(selectedPlayerForStats.id));
+            if (curRes.includes(selectedPlayerForStats.id) || isAssigned) {
+              const updatedTeams = (sData.teams || []).map((t: any) => {
+                const newIds = (t.playerIds || []).filter((id: string) => id !== selectedPlayerForStats.id);
+                return { ...t, playerIds: newIds, isIncomplete: newIds.length < 6 };
+              });
+              await updateDoc(doc(db, "sessions", "current"), {
+                reserves: curRes.filter((id: string) => id !== selectedPlayerForStats.id),
+                teams: updatedTeams
+              });
+            }
+          }
+        } catch (sessionErr) {
+          console.warn("Erro ao retirar ausente da sessão ativa:", sessionErr);
+        }
+      }
+
       setSelectedPlayerForStats(null);
     } catch (e) {
       alert("Erro ao salvar alterações do atleta.");

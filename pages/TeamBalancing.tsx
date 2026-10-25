@@ -265,6 +265,36 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     }
   }, [players]);
 
+  // Auto-cura: Se algum atleta desistiu (status === 'ausente') após o sorteio, retira-o imediatamente das equipes e dos reservas
+  useEffect(() => {
+    if (!isAdm || !session || !session.teams || session.status === 'finished') return;
+    const absentIds = new Set(players.filter(p => p.status === 'ausente').map(p => p.id));
+    if (absentIds.size === 0) return;
+
+    let hasAbsentInTeams = false;
+    const cleanedTeams = session.teams.map(t => {
+      const remaining = t.playerIds.filter(id => !absentIds.has(id));
+      if (remaining.length !== t.playerIds.length) {
+        hasAbsentInTeams = true;
+      }
+      return {
+        ...t,
+        playerIds: remaining,
+        isIncomplete: remaining.length < 6
+      };
+    });
+
+    const cleanedReserves = (session.reserves || []).filter(id => !absentIds.has(id));
+    const hasAbsentInReserves = cleanedReserves.length !== (session.reserves || []).length;
+
+    if (hasAbsentInTeams || hasAbsentInReserves) {
+      updateDoc(doc(db, "sessions", "current"), {
+        teams: cleanedTeams,
+        reserves: cleanedReserves
+      }).catch(() => {});
+    }
+  }, [players, session?.teams, session?.reserves, isAdm]);
+
   // Executar o sorteio oficial das equipes com divisão tática rigorosa e justa
   const handleGenerateOfficialTeams = async () => {
     if (!isAdm) return;

@@ -24,12 +24,13 @@ const VALID_PAGES = new Set<string>(Object.values(Page));
 
 const sanitizePlayer = (id: string, raw: any): Player => {
   const safeData = raw && typeof raw === 'object' ? raw : {};
+  const isMaster = safeData.email === MASTER_ADMIN_EMAIL || safeData.id === 'soeUlEB2R7S1q9bxd6drdLxrGRa2';
   const safeName = typeof safeData.name === 'string' && safeData.name.trim()
     ? safeData.name.trim()
-    : (safeData.email === MASTER_ADMIN_EMAIL ? 'Diogo (Admin)' : 'Atleta');
+    : (isMaster ? 'Diogo' : 'Atleta');
   const safePosition = typeof safeData.position === 'string' && safeData.position.trim()
     ? safeData.position.trim()
-    : 'Meia';
+    : (isMaster ? 'Zagueiro' : 'Zagueiro');
   const safePhoto = typeof safeData.photoUrl === 'string' && safeData.photoUrl.trim()
     ? safeData.photoUrl
     : `https://ui-avatars.com/api/?name=${encodeURIComponent(safeName)}&background=003a75&color=fff`;
@@ -189,14 +190,22 @@ const App: React.FC = () => {
           
           if (firebaseUser.email === MASTER_ADMIN_EMAIL) {
             const existing = playerDoc.exists() ? playerDoc.data() : {};
-            await setDoc(playerDocRef, {
+            const adminUpdates: any = {
               id: firebaseUser.uid,
-              name: existing?.name || firebaseUser.displayName || 'Diogo (Admin)',
-              position: existing?.position || 'Meia',
               role: 'admin',
-              email: MASTER_ADMIN_EMAIL,
-              photoUrl: existing?.photoUrl || firebaseUser.photoURL || `https://ui-avatars.com/api/?name=Diogo&background=003a75&color=fff`
-            }, { merge: true }).catch(() => {});
+              email: MASTER_ADMIN_EMAIL
+            };
+            if (!existing?.name && (firebaseUser.displayName || 'Diogo')) {
+              adminUpdates.name = firebaseUser.displayName || 'Diogo';
+            }
+            // CRÍTICO: Nunca sobrescrever a posição de um atleta se ele já possuir posição cadastrada!
+            if (!existing?.position) {
+              adminUpdates.position = 'Zagueiro';
+            }
+            if (!existing?.photoUrl && firebaseUser.photoURL) {
+              adminUpdates.photoUrl = firebaseUser.photoURL;
+            }
+            await setDoc(playerDocRef, adminUpdates, { merge: true }).catch(() => {});
             userProfileExists = true;
           }
 
@@ -640,7 +649,7 @@ const App: React.FC = () => {
         )}
         {user && activePage === Page.Profile && (
           <Profile 
-            player={currentPlayer || { id: user.uid, name: user.displayName || 'Atleta', email: user.email || '', photoUrl: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'Atleta')}&background=0051a2&color=fff`, goals: 0, assists: 0, position: 'Meio-Campo', status: 'pendente', role: effectiveRole, playerType: 'avulso' } as Player} 
+            player={currentPlayer || { id: user.uid, name: user.displayName || (isMaster ? 'Diogo' : 'Atleta'), email: user.email || '', photoUrl: user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'Atleta')}&background=0051a2&color=fff`, goals: 0, assists: 0, position: isMaster ? 'Zagueiro' : 'Zagueiro', status: 'pendente', role: effectiveRole, playerType: 'avulso' } as Player} 
             currentUser={user}
             currentUserEmail={user?.email} 
             isMaintenance={isMaintenance}
