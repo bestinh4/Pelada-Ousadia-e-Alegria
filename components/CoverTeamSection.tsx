@@ -82,22 +82,26 @@ export const WhatsAppIcon: React.FC<{ className?: string }> = ({ className = "w-
 
 // Converter Data URL base64 ou URL remota em File real para envio nativo de imagem
 export async function urlOrBase64ToFile(url: string, filename = 'time-da-semana.jpg'): Promise<File> {
-  if (url.startsWith('data:')) {
-    const parts = url.split(',');
-    const mimeMatch = parts[0].match(/:(.*?);/);
-    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-    const bstr = atob(parts[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    const blob = new Blob([u8arr], { type: mime });
-    return new File([blob], filename, { type: mime });
-  } else {
+  // Se for Data URL ou URL comum, o fetch() do navegador decodifica nativamente via C++ de forma assíncrona
+  try {
     const res = await fetch(url);
     const blob = await res.blob();
     return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+  } catch {
+    // Fallback caso fetch() de Data URL falhe em algum WebView específico
+    if (url.startsWith('data:')) {
+      const parts = url.split(',');
+      const mimeMatch = parts[0].match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const cleanBase64 = parts[1].replace(/\s/g, '');
+      const bstr = atob(cleanBase64);
+      const u8arr = new Uint8Array(bstr.length);
+      for (let i = 0; i < bstr.length; i++) {
+        u8arr[i] = bstr.charCodeAt(i);
+      }
+      return new File([u8arr], filename, { type: mime });
+    }
+    throw new Error('Falha ao processar arquivo da imagem');
   }
 }
 
@@ -113,10 +117,18 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w:
 
 // Gerador de Card Oficial Estilo Instagram (1080x1350 - formato Feed / Stories)
 export async function generateInstagramCardFile(coverTeam: CoverTeam, formattedDate: string): Promise<File> {
-  const sourceFile = await urlOrBase64ToFile(coverTeam.photoUrl, 'source.jpg');
-  const objectUrl = URL.createObjectURL(sourceFile);
-
   return new Promise((resolve, reject) => {
+    let timer: any = null;
+    let resolved = false;
+
+    // Timeout de segurança de 6 segundos para NUNCA travar a UI carregando
+    timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        reject(new Error('Tempo limite excedido ao gerar o card'));
+      }
+    }, 6000);
+
     const canvas = document.createElement('canvas');
     const W = 1080;
     const H = 1350;
@@ -124,7 +136,7 @@ export async function generateInstagramCardFile(coverTeam: CoverTeam, formattedD
     canvas.height = H;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      URL.revokeObjectURL(objectUrl);
+      clearTimeout(timer);
       return reject(new Error('Canvas context failed'));
     }
 
@@ -146,7 +158,10 @@ export async function generateInstagramCardFile(coverTeam: CoverTeam, formattedD
 
     // 3. Carregar e desenhar a imagem principal
     const img = new Image();
+    img.crossOrigin = 'anonymous';
+
     img.onload = () => {
+      if (resolved) return;
       try {
         const frameX = 54;
         const frameY = 240;
@@ -254,22 +269,31 @@ export async function generateInstagramCardFile(coverTeam: CoverTeam, formattedD
 
         // Converter canvas para File
         canvas.toBlob((blob) => {
-          URL.revokeObjectURL(objectUrl);
+          clearTimeout(timer);
+          if (resolved) return;
+          resolved = true;
           if (!blob) return reject(new Error('Canvas toBlob failed'));
           const file = new File([blob], 'card-insta-time-da-semana.jpg', { type: 'image/jpeg' });
           resolve(file);
         }, 'image/jpeg', 0.92);
       } catch (err) {
-        URL.revokeObjectURL(objectUrl);
-        reject(err);
+        clearTimeout(timer);
+        if (!resolved) {
+          resolved = true;
+          reject(err);
+        }
       }
     };
 
     img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('Erro ao carregar imagem no canvas'));
+      clearTimeout(timer);
+      if (!resolved) {
+        resolved = true;
+        reject(new Error('Erro ao carregar imagem no canvas'));
+      }
     };
-    img.src = objectUrl;
+
+    img.src = coverTeam.photoUrl;
   });
 }
 
@@ -348,32 +372,32 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
     }
   })();
 
+  const cardGenInProgressRef = useRef(false);
+
   // Limpar preview do card quando a capa for atualizada
   useEffect(() => {
     setCardPreviewUrl(null);
   }, [coverTeam?.photoUrl, coverTeam?.teamName, coverTeam?.caption]);
 
-  // Gerar preview do Card Estilo Instagram sob demanda quando selecionado
+  // Gerar preview do Card Estilo Instagram sob demanda quando a aba for selecionada
   useEffect(() => {
-    if (isShareModalOpen && shareFormat === 'card' && coverTeam && !cardPreviewUrl && !isGeneratingCard) {
-      let isMounted = true;
+    if (isShareModalOpen && shareFormat === 'card' && coverTeam && !cardPreviewUrl && !cardGenInProgressRef.current) {
+      cardGenInProgressRef.current = true;
       setIsGeneratingCard(true);
       generateInstagramCardFile(coverTeam, formattedMatchDate)
         .then((file) => {
-          if (isMounted) {
-            const url = URL.createObjectURL(file);
-            setCardPreviewUrl(url);
-          }
+          const url = URL.createObjectURL(file);
+          setCardPreviewUrl(url);
         })
-        .catch((e) => console.warn("Erro ao gerar preview do card:", e))
+        .catch((e) => {
+          console.warn("Erro ao gerar preview do card:", e);
+        })
         .finally(() => {
-          if (isMounted) setIsGeneratingCard(false);
+          cardGenInProgressRef.current = false;
+          setIsGeneratingCard(false);
         });
-      return () => {
-        isMounted = false;
-      };
     }
-  }, [isShareModalOpen, shareFormat, coverTeam, formattedMatchDate, cardPreviewUrl, isGeneratingCard]);
+  }, [isShareModalOpen, shareFormat, coverTeam, formattedMatchDate, cardPreviewUrl]);
 
   // Carregar histórico de capas anteriores
   const loadHistory = async () => {
@@ -605,48 +629,85 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
     setShareFeedback(null);
     const caption = getShareCaption();
 
+    // Timer de segurança de 3.5 segundos para garantir que o estado "carregando" NUNCA trave a UI
+    const safetyTimer = setTimeout(() => {
+      setIsSharing(false);
+    }, 3500);
+
     try {
       const file = await urlOrBase64ToFile(coverTeam.photoUrl, 'time-da-semana-ousadia-alegria.jpg');
 
-      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `🏆 ${coverTeam.teamName} • Time da Semana`,
-          text: caption
-        });
-        setShareFeedback("Foto compartilhada com sucesso!");
-        setTimeout(() => setIsShareModalOpen(false), 800);
+      let canShareFiles = false;
+      try {
+        canShareFiles = !!(typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] }));
+      } catch {
+        canShareFiles = false;
+      }
+
+      if (canShareFiles) {
+        try {
+          const sharePromise = navigator.share({
+            files: [file],
+            title: `🏆 ${coverTeam.teamName} • Time da Semana`,
+            text: caption
+          });
+
+          // No mobile o share sheet abre imediatamente
+          setTimeout(() => {
+            clearTimeout(safetyTimer);
+            setIsSharing(false);
+            setShareFeedback("📸 Janela de envio aberta! Escolha o WhatsApp da turma.");
+          }, 1000);
+
+          await sharePromise;
+          clearTimeout(safetyTimer);
+          setIsSharing(false);
+          setShareFeedback("Foto compartilhada com sucesso!");
+          setTimeout(() => setIsShareModalOpen(false), 1200);
+          return;
+        } catch (shareErr: any) {
+          if (shareErr.name === 'AbortError') {
+            clearTimeout(safetyTimer);
+            setIsSharing(false);
+            return;
+          }
+          console.warn("Falha no share nativo com arquivo, acionando fallback:", shareErr);
+        }
+      }
+
+      // Fallback amigável: cópia para área de transferência + download + link do WhatsApp
+      let copied = false;
+      if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        try {
+          const item = new ClipboardItem({ [file.type]: file });
+          await navigator.clipboard.write([item]);
+          copied = true;
+        } catch {}
+      }
+
+      // Download da foto para que o usuário tenha o arquivo pronto
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(file);
+      link.download = file.name;
+      link.click();
+
+      // Abrir WhatsApp com a mensagem/legenda
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
+
+      clearTimeout(safetyTimer);
+      setIsSharing(false);
+
+      if (copied) {
+        setShareFeedback("📸 Foto copiada e baixada! No WhatsApp, aperte Ctrl+V ou anexe a foto baixada.");
       } else {
-        // Fallback para navegadores sem compartilhamento nativo de arquivos
-        let copied = false;
-        if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-          try {
-            const item = new ClipboardItem({ [file.type]: file });
-            await navigator.clipboard.write([item]);
-            copied = true;
-          } catch {}
-        }
-
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(file);
-        link.download = file.name;
-        link.click();
-
-        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
-
-        if (copied) {
-          alert("📸 A FOTO FOI COPIADA E BAIXADA!\n\nNo WhatsApp Web, basta apertar Ctrl+V no grupo para colar a imagem diretamente com a legenda!");
-        } else {
-          alert("📸 A foto foi baixada no seu aparelho! Basta anexá-la no grupo do WhatsApp.");
-        }
+        setShareFeedback("📸 Foto baixada no seu aparelho! Basta anexá-la no grupo.");
       }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.warn("Erro ao compartilhar foto:", err);
-        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
-      }
-    } finally {
+      clearTimeout(safetyTimer);
       setIsSharing(false);
+      console.warn("Erro ao compartilhar foto:", err);
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
+      setShareFeedback("Abrindo WhatsApp com a legenda...");
     }
   };
 
@@ -656,47 +717,80 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
     setShareFeedback(null);
     const caption = getShareCaption();
 
+    const safetyTimer = setTimeout(() => {
+      setIsSharing(false);
+    }, 4500);
+
     try {
       const cardFile = await generateInstagramCardFile(coverTeam, formattedMatchDate);
 
-      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [cardFile] })) {
-        await navigator.share({
-          files: [cardFile],
-          title: `🏆 Card Oficial - ${coverTeam.teamName}`,
-          text: caption
-        });
-        setShareFeedback("Card oficial compartilhado com sucesso!");
-        setTimeout(() => setIsShareModalOpen(false), 800);
+      let canShareFiles = false;
+      try {
+        canShareFiles = !!(typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [cardFile] }));
+      } catch {
+        canShareFiles = false;
+      }
+
+      if (canShareFiles) {
+        try {
+          const sharePromise = navigator.share({
+            files: [cardFile],
+            title: `🏆 Card Oficial - ${coverTeam.teamName}`,
+            text: caption
+          });
+
+          setTimeout(() => {
+            clearTimeout(safetyTimer);
+            setIsSharing(false);
+            setShareFeedback("✨ Janela de envio aberta! Escolha o WhatsApp da turma.");
+          }, 1000);
+
+          await sharePromise;
+          clearTimeout(safetyTimer);
+          setIsSharing(false);
+          setShareFeedback("Card oficial compartilhado com sucesso!");
+          setTimeout(() => setIsShareModalOpen(false), 1200);
+          return;
+        } catch (shareErr: any) {
+          if (shareErr.name === 'AbortError') {
+            clearTimeout(safetyTimer);
+            setIsSharing(false);
+            return;
+          }
+          console.warn("Falha no share nativo com card, acionando fallback:", shareErr);
+        }
+      }
+
+      let copied = false;
+      if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        try {
+          const item = new ClipboardItem({ [cardFile.type]: cardFile });
+          await navigator.clipboard.write([item]);
+          copied = true;
+        } catch {}
+      }
+
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(cardFile);
+      link.download = cardFile.name;
+      link.click();
+
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
+
+      clearTimeout(safetyTimer);
+      setIsSharing(false);
+
+      if (copied) {
+        setShareFeedback("✨ Card copiado e baixado! No WhatsApp, aperte Ctrl+V ou anexe o card baixado.");
       } else {
-        let copied = false;
-        if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
-          try {
-            const item = new ClipboardItem({ [cardFile.type]: cardFile });
-            await navigator.clipboard.write([item]);
-            copied = true;
-          } catch {}
-        }
-
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(cardFile);
-        link.download = cardFile.name;
-        link.click();
-
-        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
-
-        if (copied) {
-          alert("📸 O CARD OFICIAL FOI COPIADO E BAIXADO!\n\nNo WhatsApp Web, basta apertar Ctrl+V no grupo para colar o card diretamente!");
-        } else {
-          alert("📸 O card foi baixado! Anexe o card no grupo do WhatsApp.");
-        }
+        setShareFeedback("✨ Card baixado! Anexe o arquivo no WhatsApp.");
       }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.warn("Erro ao gerar/compartilhar card:", err);
-        alert("Erro ao gerar o card oficial. Tente novamente.");
-      }
-    } finally {
+      clearTimeout(safetyTimer);
       setIsSharing(false);
+      console.warn("Erro ao gerar/compartilhar card:", err);
+      // Fallback para envio direto da foto comum
+      handleShareDirectPhoto();
     }
   };
 
@@ -710,16 +804,16 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
       if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
         const item = new ClipboardItem({ [file.type]: file });
         await navigator.clipboard.write([item]);
-        alert("✅ Imagem copiada com sucesso!\n\nAbra o WhatsApp Web e pressione Ctrl+V no grupo para colar a foto diretamente!");
+        setShareFeedback("✅ Imagem copiada! No WhatsApp Web, aperte Ctrl+V no grupo.");
       } else {
         const link = document.createElement('a');
         link.href = URL.createObjectURL(file);
         link.download = file.name;
         link.click();
-        alert("Foto baixada no seu aparelho!");
+        setShareFeedback("📥 Foto baixada no seu aparelho!");
       }
     } catch {
-      alert("Não foi possível copiar diretamente. Use a opção de Baixar Foto.");
+      setShareFeedback("Não foi possível copiar diretamente. Clique em Baixar Foto.");
     }
   };
 
@@ -734,8 +828,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
       link.href = URL.createObjectURL(file);
       link.download = file.name;
       link.click();
+      setShareFeedback("📥 Download iniciado!");
     } catch {
-      alert("Erro ao baixar a imagem.");
+      setShareFeedback("Erro ao baixar a imagem.");
     }
   };
 
@@ -1462,9 +1557,23 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                 className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
               />
             ) : (
-              <div className="flex flex-col items-center justify-center gap-2 p-6 text-white/70 text-center">
+              <div className="flex flex-col items-center justify-center gap-2.5 p-4 text-white text-center">
                 <span className="text-3xl">✨</span>
-                <span className="text-xs">Carregando visualização do card...</span>
+                <span className="text-xs font-semibold text-white/80">Card Estilo Instagram</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    cardGenInProgressRef.current = false;
+                    setIsGeneratingCard(true);
+                    generateInstagramCardFile(coverTeam, formattedMatchDate)
+                      .then((file) => setCardPreviewUrl(URL.createObjectURL(file)))
+                      .catch((e) => console.warn(e))
+                      .finally(() => setIsGeneratingCard(false));
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 hover:opacity-95 text-white text-xs font-bold shadow-md cursor-pointer active:scale-95 transition-all"
+                >
+                  Carregar Prévia do Card
+                </button>
               </div>
             )}
 
@@ -1479,7 +1588,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
           {/* Mensagem de Feedback temporário */}
           {shareFeedback && (
             <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-bold text-center animate-fade-in shrink-0">
-              ✅ {shareFeedback}
+              {shareFeedback}
             </div>
           )}
 
@@ -1488,13 +1597,13 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
             <button
               type="button"
               onClick={shareFormat === 'card' ? handleShareInstagramCard : handleShareDirectPhoto}
-              disabled={isSharing || (shareFormat === 'card' && isGeneratingCard)}
+              disabled={isSharing}
               className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 hover:from-emerald-500 hover:to-green-600 text-white font-headline-sm text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
             >
               <WhatsAppIcon className="w-5 h-5 fill-current text-white shrink-0" />
               <span>
                 {isSharing
-                  ? 'Preparando foto e enviando...'
+                  ? 'Abrindo WhatsApp...'
                   : shareFormat === 'card'
                   ? 'Enviar Card no Grupo do WhatsApp'
                   : 'Enviar Foto no Grupo do WhatsApp'}
@@ -1506,7 +1615,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
               <button
                 type="button"
                 onClick={() => handleCopyImage(shareFormat)}
-                disabled={isSharing || (shareFormat === 'card' && isGeneratingCard)}
+                disabled={isSharing}
                 className="py-2.5 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep font-bold text-xs flex items-center justify-center gap-1.5 border border-surface-container-high/70 active:scale-95 transition-all cursor-pointer"
                 title="Copia a imagem para colar com Ctrl+V no WhatsApp Web"
               >
@@ -1517,7 +1626,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
               <button
                 type="button"
                 onClick={() => handleDownloadImage(shareFormat)}
-                disabled={isSharing || (shareFormat === 'card' && isGeneratingCard)}
+                disabled={isSharing}
                 className="py-2.5 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep font-bold text-xs flex items-center justify-center gap-1.5 border border-surface-container-high/70 active:scale-95 transition-all cursor-pointer"
                 title="Baixar imagem no dispositivo"
               >
@@ -1525,6 +1634,18 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                 <span>Baixar Foto</span>
               </button>
             </div>
+
+            {/* Acesso direto ao WhatsApp com legenda e link */}
+            <a
+              href={`https://api.whatsapp.com/send?text=${encodeURIComponent(getShareCaption())}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center gap-2 border border-emerald-300 transition-all cursor-pointer"
+            >
+              <WhatsAppIcon className="w-3.5 h-3.5 fill-current text-emerald-600" />
+              <span>Abrir WhatsApp com Legenda da Rodada</span>
+              <span className="material-symbols-outlined text-[15px]">open_in_new</span>
+            </a>
 
             {/* Link direto do perfil do Instagram */}
             <a
