@@ -5,6 +5,8 @@ import webpush from "web-push";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { initializeApp as initClientApp, getApps as getClientApps } from "firebase/app";
+import { getFirestore as getClientFirestore, doc, getDoc } from "firebase/firestore";
 import { analyzeReceiptWithGemini } from "./api/verify-receipt.ts";
 import { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT } from "./constants/vapid.ts";
 
@@ -12,6 +14,18 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const clientFirebaseConfig = {
+  apiKey: "AIzaSyBa8kF4pSrx_-GuHVT_hGMgh_UmRc0NBx0",
+  authDomain: "ousadia-5b1d8.firebaseapp.com",
+  projectId: "ousadia-5b1d8",
+  storageBucket: "ousadia-5b1d8.firebasestorage.app",
+  messagingSenderId: "812821310641",
+  appId: "1:812821310641:web:d5256ab8fea0ad1323c690"
+};
+
+const clientApp = getClientApps().length === 0 ? initClientApp(clientFirebaseConfig, "server-client") : getClientApps()[0];
+const clientDb = getClientFirestore(clientApp);
 
 // Configuração do Web Push padrão W3C para notificações com app fechado
 try {
@@ -49,6 +63,33 @@ async function startServer() {
   // API Health Check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  // Imagem do Time da Semana para WhatsApp Link Preview & Redes Sociais
+  app.get("/api/cover-team/image", async (req, res) => {
+    try {
+      const snap = await getDoc(doc(clientDb, "settings", "coverTeam"));
+      if (snap.exists()) {
+        const data = snap.data();
+        const photoUrl = data?.photoUrl;
+        if (photoUrl && typeof photoUrl === "string") {
+          if (photoUrl.startsWith("data:image/")) {
+            const parts = photoUrl.split(",");
+            const mimeMatch = parts[0].match(/:(.*?);/);
+            const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+            const buffer = Buffer.from(parts[1], "base64");
+            res.set("Content-Type", mimeType);
+            res.set("Cache-Control", "public, max-age=60");
+            return res.send(buffer);
+          } else if (photoUrl.startsWith("http")) {
+            return res.redirect(photoUrl);
+          }
+        }
+      }
+      return res.sendFile(path.join(__dirname, "public", "images", "ousadia_alegria_crest.png"));
+    } catch (e) {
+      return res.sendFile(path.join(__dirname, "public", "images", "ousadia_alegria_crest.png"));
+    }
   });
 
   // Disparo de Notificações Web Push (Entregues mesmo com o aplicativo fechado)

@@ -72,6 +72,207 @@ async function compressCoverPhoto(file: File): Promise<string> {
   });
 }
 
+// Ícone SVG vetorizado do WhatsApp
+export const WhatsAppIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.771-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.312.045-.697.073-2.02-.474-1.688-.698-2.77-2.428-2.855-2.54-.085-.113-.679-.904-.679-1.724 0-.82.427-1.224.58-1.389.152-.165.333-.207.444-.207.111 0 .222.001.32.005.103.004.24-.039.375.285.14.336.478 1.166.52 1.251.042.085.07.185.014.296-.056.111-.084.18-.168.278-.084.098-.176.219-.252.294-.084.084-.171.175-.074.341.097.166.432.713.927 1.154.636.568 1.172.744 1.338.827.166.084.263.07.361-.042.097-.113.416-.484.527-.65.111-.167.222-.139.374-.084.152.056.969.457 1.135.54.166.083.277.125.319.194.042.069.042.403-.102.808z" />
+    <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2.05 22l4.98-1.306A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18.167c-1.644 0-3.17-.478-4.464-1.303l-.32-.204-2.956.775.789-2.883-.223-.355A8.134 8.134 0 013.833 12c0-4.503 3.664-8.167 8.167-8.167 4.503 0 8.167 3.664 8.167 8.167 0 4.503-3.664 8.167-8.167 8.167z" />
+  </svg>
+);
+
+// Converter Data URL base64 ou URL remota em File real para envio nativo de imagem
+export async function urlOrBase64ToFile(url: string, filename = 'time-da-semana.jpg'): Promise<File> {
+  if (url.startsWith('data:')) {
+    const parts = url.split(',');
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    const blob = new Blob([u8arr], { type: mime });
+    return new File([blob], filename, { type: mime });
+  } else {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new File([blob], filename, { type: blob.type || 'image/jpeg' });
+  }
+}
+
+function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Gerador de Card Oficial Estilo Instagram (1080x1350 - formato Feed / Stories)
+export async function generateInstagramCardFile(coverTeam: CoverTeam, formattedDate: string): Promise<File> {
+  const sourceFile = await urlOrBase64ToFile(coverTeam.photoUrl, 'source.jpg');
+  const objectUrl = URL.createObjectURL(sourceFile);
+
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas');
+    const W = 1080;
+    const H = 1350;
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      URL.revokeObjectURL(objectUrl);
+      return reject(new Error('Canvas context failed'));
+    }
+
+    // 1. Fundo Gradiente Noite de Estádio
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+    bgGrad.addColorStop(0, '#060d1f');
+    bgGrad.addColorStop(0.5, '#0a1633');
+    bgGrad.addColorStop(1, '#020617');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // 2. Halo Dourado / Vermelho de Iluminação
+    const glow = ctx.createRadialGradient(W / 2, 280, 50, W / 2, 280, 550);
+    glow.addColorStop(0, 'rgba(245, 158, 11, 0.25)');
+    glow.addColorStop(0.5, 'rgba(227, 6, 19, 0.15)');
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+
+    // 3. Carregar e desenhar a imagem principal
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const frameX = 54;
+        const frameY = 240;
+        const frameW = W - 108; // 972
+        const frameH = 820;
+
+        // Sombra externa da moldura
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+        ctx.shadowBlur = 35;
+        ctx.shadowOffsetY = 15;
+        ctx.fillStyle = '#0f172a';
+        drawRoundedRect(ctx, frameX, frameY, frameW, frameH, 28);
+        ctx.fill();
+        ctx.restore();
+
+        // Desenhar a foto com cantos arredondados (sem cortes)
+        ctx.save();
+        drawRoundedRect(ctx, frameX, frameY, frameW, frameH, 28);
+        ctx.clip();
+
+        // Fundo sutil para preencher possíveis bordas da foto
+        ctx.drawImage(img, frameX - 40, frameY - 40, frameW + 80, frameH + 80);
+        ctx.fillStyle = 'rgba(10, 15, 30, 0.7)';
+        ctx.fillRect(frameX, frameY, frameW, frameH);
+
+        // Foto com aspect ratio perfeito (contain)
+        const imgRatio = img.width / img.height;
+        const frameRatio = frameW / frameH;
+        let drawW = frameW;
+        let drawH = frameH;
+        let drawX = frameX;
+        let drawY = frameY;
+
+        if (imgRatio > frameRatio) {
+          drawH = frameW / imgRatio;
+          drawY = frameY + (frameH - drawH) / 2;
+        } else {
+          drawW = frameH * imgRatio;
+          drawX = frameX + (frameW - drawW) / 2;
+        }
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        ctx.restore();
+
+        // Borda dourada refinada em volta da foto
+        ctx.save();
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 4;
+        drawRoundedRect(ctx, frameX, frameY, frameW, frameH, 28);
+        ctx.stroke();
+        ctx.restore();
+
+        // 4. HEADER SUPERIOR DO CARD
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = '900 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('⭐ TIME DA SEMANA ⭐', W / 2, 75);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 46px sans-serif';
+        ctx.fillText('OUSADIA & ALEGRIA F.C.', W / 2, 135);
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+        ctx.font = '600 20px sans-serif';
+        ctx.fillText(
+          formattedDate ? `RODADA DE ${formattedDate.toUpperCase()} • GRANJA CANTINHO DO CÉU` : 'PELADA OFICIAL • GRANJA CANTINHO DO CÉU',
+          W / 2,
+          180
+        );
+
+        // 5. RODAPÉ INFERIOR DO CARD (Estilo Instagram)
+        ctx.fillStyle = '#fef08a';
+        ctx.font = '900 40px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`🏆 ${coverTeam.teamName.toUpperCase()}`, W / 2, 1120);
+
+        if (coverTeam.caption) {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+          ctx.font = 'italic 500 22px sans-serif';
+          const cleanCaption = coverTeam.caption.length > 70 
+            ? coverTeam.caption.slice(0, 67) + '...'
+            : coverTeam.caption;
+          ctx.fillText(`"${cleanCaption}"`, W / 2, 1165);
+        }
+
+        // Selo do Instagram Gradiente
+        const badgeY = 1215;
+        const badgeW = 500;
+        const badgeH = 64;
+        const badgeX = (W - badgeW) / 2;
+
+        ctx.save();
+        const instaGrad = ctx.createLinearGradient(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH);
+        instaGrad.addColorStop(0, '#f09433');
+        instaGrad.addColorStop(0.5, '#dc2743');
+        instaGrad.addColorStop(1, '#bc1888');
+        ctx.fillStyle = instaGrad;
+        drawRoundedRect(ctx, badgeX, badgeY, badgeW, badgeH, 32);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 24px sans-serif';
+        ctx.fillText('📸 @pelada_ousadia_alegria', W / 2, badgeY + 41);
+        ctx.restore();
+
+        // Converter canvas para File
+        canvas.toBlob((blob) => {
+          URL.revokeObjectURL(objectUrl);
+          if (!blob) return reject(new Error('Canvas toBlob failed'));
+          const file = new File([blob], 'card-insta-time-da-semana.jpg', { type: 'image/jpeg' });
+          resolve(file);
+        }, 'image/jpeg', 0.92);
+      } catch (err) {
+        URL.revokeObjectURL(objectUrl);
+        reject(err);
+      }
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Erro ao carregar imagem no canvas'));
+    };
+    img.src = objectUrl;
+  });
+}
+
 export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
   players = [],
   user,
@@ -84,6 +285,14 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [lightboxZoom, setLightboxZoom] = useState(1);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+
+  // Estados de compartilhamento com imagem e card estilo Instagram
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareFormat, setShareFormat] = useState<'photo' | 'card'>('photo');
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const [cardPreviewUrl, setCardPreviewUrl] = useState<string | null>(null);
+  const [isGeneratingCard, setIsGeneratingCard] = useState(false);
 
   // Estados do formulário de edição
   const [isSaving, setIsSaving] = useState(false);
@@ -123,6 +332,48 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
 
     return () => unsub();
   }, []);
+
+  // Formatador da data da conquista (seguro contra valores nulos)
+  const formattedMatchDate = (() => {
+    if (!coverTeam?.matchDate) return '';
+    try {
+      const parts = coverTeam.matchDate.split('-');
+      if (parts.length === 3) {
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+      }
+      return coverTeam.matchDate;
+    } catch {
+      return coverTeam.matchDate;
+    }
+  })();
+
+  // Limpar preview do card quando a capa for atualizada
+  useEffect(() => {
+    setCardPreviewUrl(null);
+  }, [coverTeam?.photoUrl, coverTeam?.teamName, coverTeam?.caption]);
+
+  // Gerar preview do Card Estilo Instagram sob demanda quando selecionado
+  useEffect(() => {
+    if (isShareModalOpen && shareFormat === 'card' && coverTeam && !cardPreviewUrl && !isGeneratingCard) {
+      let isMounted = true;
+      setIsGeneratingCard(true);
+      generateInstagramCardFile(coverTeam, formattedMatchDate)
+        .then((file) => {
+          if (isMounted) {
+            const url = URL.createObjectURL(file);
+            setCardPreviewUrl(url);
+          }
+        })
+        .catch((e) => console.warn("Erro ao gerar preview do card:", e))
+        .finally(() => {
+          if (isMounted) setIsGeneratingCard(false);
+        });
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [isShareModalOpen, shareFormat, coverTeam, formattedMatchDate, cardPreviewUrl, isGeneratingCard]);
 
   // Carregar histórico de capas anteriores
   const loadHistory = async () => {
@@ -332,23 +583,159 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
     }
   };
 
-  const handleShare = async () => {
+  const handleShare = () => {
+    setIsShareModalOpen(true);
+  };
+
+  const getShareCaption = () => {
+    if (!coverTeam) return '';
+    return (
+      `📸 *TIME DA SEMANA • OUSADIA & ALEGRIA F.C.* 🇭🇷\n` +
+      `🏆 *${coverTeam.teamName}*\n` +
+      (coverTeam.caption ? `💬 "${coverTeam.caption}"\n` : '') +
+      `⚽ Parabéns aos atletas campeões da rodada!\n\n` +
+      `📷 Siga nosso Instagram oficial:\n` +
+      `${coverTeam.instagramUrl || OFFICIAL_INSTAGRAM_URL}`
+    );
+  };
+
+  const handleShareDirectPhoto = async () => {
     if (!coverTeam) return;
-    const shareText = `📸 Time Capa da Semana • Ousadia & Alegria Futebol Clube!\n🏆 ${coverTeam.teamName}\n⚽ Parabéns aos atletas! Confira no app e no Instagram: ${coverTeam.instagramUrl || ''}`;
-    
-    if (navigator.share) {
-      try {
+    setIsSharing(true);
+    setShareFeedback(null);
+    const caption = getShareCaption();
+
+    try {
+      const file = await urlOrBase64ToFile(coverTeam.photoUrl, 'time-da-semana-ousadia-alegria.jpg');
+
+      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
-          title: `Time Capa da Semana - ${coverTeam.teamName}`,
-          text: shareText,
-          url: window.location.href
+          files: [file],
+          title: `🏆 ${coverTeam.teamName} • Time da Semana`,
+          text: caption
         });
-      } catch {}
-    } else {
-      try {
-        await navigator.clipboard.writeText(shareText);
-        alert("Link e mensagem copiados para a área de transferência!");
-      } catch {}
+        setShareFeedback("Foto compartilhada com sucesso!");
+        setTimeout(() => setIsShareModalOpen(false), 800);
+      } else {
+        // Fallback para navegadores sem compartilhamento nativo de arquivos
+        let copied = false;
+        if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+          try {
+            const item = new ClipboardItem({ [file.type]: file });
+            await navigator.clipboard.write([item]);
+            copied = true;
+          } catch {}
+        }
+
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(file);
+        link.download = file.name;
+        link.click();
+
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
+
+        if (copied) {
+          alert("📸 A FOTO FOI COPIADA E BAIXADA!\n\nNo WhatsApp Web, basta apertar Ctrl+V no grupo para colar a imagem diretamente com a legenda!");
+        } else {
+          alert("📸 A foto foi baixada no seu aparelho! Basta anexá-la no grupo do WhatsApp.");
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn("Erro ao compartilhar foto:", err);
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
+      }
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleShareInstagramCard = async () => {
+    if (!coverTeam) return;
+    setIsSharing(true);
+    setShareFeedback(null);
+    const caption = getShareCaption();
+
+    try {
+      const cardFile = await generateInstagramCardFile(coverTeam, formattedMatchDate);
+
+      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [cardFile] })) {
+        await navigator.share({
+          files: [cardFile],
+          title: `🏆 Card Oficial - ${coverTeam.teamName}`,
+          text: caption
+        });
+        setShareFeedback("Card oficial compartilhado com sucesso!");
+        setTimeout(() => setIsShareModalOpen(false), 800);
+      } else {
+        let copied = false;
+        if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+          try {
+            const item = new ClipboardItem({ [cardFile.type]: cardFile });
+            await navigator.clipboard.write([item]);
+            copied = true;
+          } catch {}
+        }
+
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(cardFile);
+        link.download = cardFile.name;
+        link.click();
+
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(caption)}`, '_blank');
+
+        if (copied) {
+          alert("📸 O CARD OFICIAL FOI COPIADO E BAIXADO!\n\nNo WhatsApp Web, basta apertar Ctrl+V no grupo para colar o card diretamente!");
+        } else {
+          alert("📸 O card foi baixado! Anexe o card no grupo do WhatsApp.");
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn("Erro ao gerar/compartilhar card:", err);
+        alert("Erro ao gerar o card oficial. Tente novamente.");
+      }
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleCopyImage = async (format: 'photo' | 'card' = 'photo') => {
+    if (!coverTeam) return;
+    try {
+      const file = format === 'card'
+        ? await generateInstagramCardFile(coverTeam, formattedMatchDate)
+        : await urlOrBase64ToFile(coverTeam.photoUrl, 'time-da-semana.jpg');
+
+      if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        const item = new ClipboardItem({ [file.type]: file });
+        await navigator.clipboard.write([item]);
+        alert("✅ Imagem copiada com sucesso!\n\nAbra o WhatsApp Web e pressione Ctrl+V no grupo para colar a foto diretamente!");
+      } else {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(file);
+        link.download = file.name;
+        link.click();
+        alert("Foto baixada no seu aparelho!");
+      }
+    } catch {
+      alert("Não foi possível copiar diretamente. Use a opção de Baixar Foto.");
+    }
+  };
+
+  const handleDownloadImage = async (format: 'photo' | 'card' = 'photo') => {
+    if (!coverTeam) return;
+    try {
+      const file = format === 'card'
+        ? await generateInstagramCardFile(coverTeam, formattedMatchDate)
+        : await urlOrBase64ToFile(coverTeam.photoUrl, 'time-da-semana.jpg');
+
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(file);
+      link.download = file.name;
+      link.click();
+    } catch {
+      alert("Erro ao baixar a imagem.");
     }
   };
 
@@ -426,21 +813,6 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
       </div>
     );
   }
-
-  // Formatador da data da conquista
-  const formattedMatchDate = (() => {
-    if (!coverTeam.matchDate) return '';
-    try {
-      const parts = coverTeam.matchDate.split('-');
-      if (parts.length === 3) {
-        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-        return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
-      }
-      return coverTeam.matchDate;
-    } catch {
-      return coverTeam.matchDate;
-    }
-  })();
 
   // Render do Modal de Edição/Criação da Capa
   function renderModal() {
@@ -905,10 +1277,10 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
           <button
             type="button"
             onClick={handleShare}
-            className="px-4 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold flex items-center gap-1.5 border border-white/20 active:scale-95 transition-all"
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-900/40 active:scale-95 transition-all cursor-pointer"
           >
-            <span className="material-symbols-outlined text-[18px]">share</span>
-            <span>Compartilhar</span>
+            <WhatsAppIcon className="w-4 h-4 fill-current text-white" />
+            <span>Compartilhar Foto (Zap / Insta)</span>
           </button>
         </div>
       </div>,
@@ -990,6 +1362,192 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
                 </div>
               ))
             )}
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
+
+  // Render do Modal de Compartilhamento com Imagem Direta / Card Instagram
+  function renderShareModal() {
+    if (!coverTeam || typeof document === 'undefined') return null;
+
+    return createPortal(
+      <div
+        style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100dvh', zIndex: 100001 }}
+        className="bg-navy-deep/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+        onClick={() => !isSharing && setIsShareModalOpen(false)}
+      >
+        <div
+          className="bg-white text-navy-deep max-w-lg w-full max-h-[94dvh] rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-surface-container-high/60 shadow-2xl flex flex-col gap-3.5 overflow-hidden animate-fade-in"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-surface-container-high/50 pb-3 shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-green-600 flex items-center justify-center text-white shrink-0 shadow-md shadow-green-900/20">
+                <WhatsAppIcon className="w-5 h-5 fill-current text-white" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-headline-sm text-sm sm:text-base text-navy-deep font-extrabold truncate">
+                  Compartilhar Foto da Semana
+                </h3>
+                <p className="text-[11px] text-outline truncate">
+                  Envie com a imagem aparecendo direto no WhatsApp ou Instagram!
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsShareModalOpen(false)}
+              disabled={isSharing}
+              className="w-8 h-8 rounded-full bg-surface-container hover:bg-surface-container-high flex items-center justify-center text-outline hover:text-navy-deep transition-all shrink-0 cursor-pointer"
+              title="Fechar"
+            >
+              <span className="material-symbols-outlined text-[18px]">close</span>
+            </button>
+          </div>
+
+          {/* Abas de Formato: Foto Direta vs Card Oficial Estilo Insta */}
+          <div className="grid grid-cols-2 gap-2 p-1 bg-surface-container-low rounded-xl border border-surface-container-high/60 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShareFormat('photo')}
+              className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                shareFormat === 'photo'
+                  ? 'bg-white text-emerald-700 shadow-sm border border-emerald-300/50'
+                  : 'text-outline hover:text-navy-deep'
+              }`}
+            >
+              <span className="text-base">📸</span>
+              <span>Foto Original</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShareFormat('card')}
+              className={`py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                shareFormat === 'card'
+                  ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white shadow-sm'
+                  : 'text-outline hover:text-navy-deep'
+              }`}
+            >
+              <span className="text-base">✨</span>
+              <span>Card Estilo Insta</span>
+            </button>
+          </div>
+
+          {/* Preview Container */}
+          <div className="flex-1 min-h-[190px] max-h-[300px] sm:max-h-[330px] bg-slate-950 rounded-2xl p-2 relative overflow-hidden flex items-center justify-center border border-slate-800">
+            {shareFormat === 'photo' ? (
+              <img
+                src={coverTeam.photoUrl}
+                alt={coverTeam.teamName}
+                className="max-w-full max-h-full object-contain rounded-lg shadow-xl"
+              />
+            ) : isGeneratingCard ? (
+              <div className="flex flex-col items-center justify-center gap-2.5 p-6 text-white text-center">
+                <span className="material-symbols-outlined text-4xl text-amber-400 animate-spin">
+                  progress_activity
+                </span>
+                <span className="text-xs font-bold text-white/90">
+                  Gerando Card Oficial com Escudo & Moldura...
+                </span>
+              </div>
+            ) : cardPreviewUrl ? (
+              <img
+                src={cardPreviewUrl}
+                alt="Card Estilo Instagram"
+                className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center gap-2 p-6 text-white/70 text-center">
+                <span className="text-3xl">✨</span>
+                <span className="text-xs">Carregando visualização do card...</span>
+              </div>
+            )}
+
+            {/* Badge de formato no canto */}
+            <div className="absolute top-3 left-3 pointer-events-none">
+              <span className="px-2.5 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-[10px] font-black uppercase tracking-wider text-amber-300 border border-white/10 shadow-sm flex items-center gap-1">
+                <span>{shareFormat === 'photo' ? '📸 Foto Limpa' : '✨ Card 4:5 Oficial'}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Mensagem de Feedback temporário */}
+          {shareFeedback && (
+            <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 px-3 py-1.5 rounded-xl text-xs font-bold text-center animate-fade-in shrink-0">
+              ✅ {shareFeedback}
+            </div>
+          )}
+
+          {/* Botão de Envio Principal (WhatsApp) */}
+          <div className="space-y-2 shrink-0">
+            <button
+              type="button"
+              onClick={shareFormat === 'card' ? handleShareInstagramCard : handleShareDirectPhoto}
+              disabled={isSharing || (shareFormat === 'card' && isGeneratingCard)}
+              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 hover:from-emerald-500 hover:to-green-600 text-white font-headline-sm text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 active:scale-98 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              <WhatsAppIcon className="w-5 h-5 fill-current text-white shrink-0" />
+              <span>
+                {isSharing
+                  ? 'Preparando foto e enviando...'
+                  : shareFormat === 'card'
+                  ? 'Enviar Card no Grupo do WhatsApp'
+                  : 'Enviar Foto no Grupo do WhatsApp'}
+              </span>
+            </button>
+
+            {/* Ações Rápidas: Copiar Foto (Ctrl+V) & Baixar */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleCopyImage(shareFormat)}
+                disabled={isSharing || (shareFormat === 'card' && isGeneratingCard)}
+                className="py-2.5 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep font-bold text-xs flex items-center justify-center gap-1.5 border border-surface-container-high/70 active:scale-95 transition-all cursor-pointer"
+                title="Copia a imagem para colar com Ctrl+V no WhatsApp Web"
+              >
+                <span className="material-symbols-outlined text-[17px] text-emerald-600">content_copy</span>
+                <span>Copiar (Ctrl+V Zap Web)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleDownloadImage(shareFormat)}
+                disabled={isSharing || (shareFormat === 'card' && isGeneratingCard)}
+                className="py-2.5 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep font-bold text-xs flex items-center justify-center gap-1.5 border border-surface-container-high/70 active:scale-95 transition-all cursor-pointer"
+                title="Baixar imagem no dispositivo"
+              >
+                <span className="material-symbols-outlined text-[17px] text-primary-container">download</span>
+                <span>Baixar Foto</span>
+              </button>
+            </div>
+
+            {/* Link direto do perfil do Instagram */}
+            <a
+              href={coverTeam.instagramUrl || OFFICIAL_INSTAGRAM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-purple-600/10 hover:bg-rose-50 text-navy-deep font-bold text-xs flex items-center justify-center gap-1.5 border border-rose-200 transition-all"
+            >
+              <InstagramIcon className="w-3.5 h-3.5" color="#dc2743" />
+              <span>Abrir Perfil Oficial ({OFFICIAL_INSTAGRAM_HANDLE})</span>
+              <span className="material-symbols-outlined text-[15px] text-rose-500">open_in_new</span>
+            </a>
+          </div>
+
+          {/* Dica de uso */}
+          <div className="bg-emerald-50/80 rounded-xl p-2.5 border border-emerald-200 text-[11px] text-emerald-950 flex items-start gap-2 shrink-0">
+            <span className="text-base shrink-0">💡</span>
+            <div className="leading-snug">
+              <span className="font-extrabold text-emerald-900">Como funciona o envio com imagem:</span>
+              <p className="text-emerald-800 mt-0.5">
+                No celular, o WhatsApp abre automaticamente com a <strong>foto anexada</strong> junto com a legenda. No computador (WhatsApp Web), clique em <em>Copiar</em> e aperte <strong>Ctrl+V</strong> na conversa!
+              </p>
+            </div>
           </div>
         </div>
       </div>,
@@ -1184,10 +1742,10 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
           <button
             type="button"
             onClick={handleShare}
-            className="min-h-[40px] px-3.5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-navy-deep font-label-md text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all"
+            className="min-h-[42px] px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-green-600 to-emerald-700 hover:from-emerald-500 hover:to-green-600 text-white font-headline-sm text-xs sm:text-sm font-bold flex items-center gap-2 shadow-md shadow-emerald-900/30 active:scale-95 transition-all cursor-pointer"
           >
-            <span className="material-symbols-outlined text-[17px] text-primary-container">share</span>
-            <span>Compartilhar com a Turma</span>
+            <WhatsAppIcon className="w-4 h-4 fill-current text-white" />
+            <span>Compartilhar Foto (Zap / Insta)</span>
           </button>
 
           <div className="flex items-center gap-2 flex-wrap">
@@ -1220,6 +1778,7 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
       {isModalOpen && renderModal()}
       {isLightboxOpen && renderLightbox()}
       {isHistoryModalOpen && renderHistoryModal()}
+      {isShareModalOpen && renderShareModal()}
     </div>
   );
 };
