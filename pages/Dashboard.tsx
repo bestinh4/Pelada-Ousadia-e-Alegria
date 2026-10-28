@@ -18,6 +18,8 @@ interface DashboardProps {
   user: any;
   currentUserRole?: 'admin' | 'player';
   onPageChange: (page: Page) => void;
+  isChristmasThemeActive?: boolean;
+  christmasThemeMode?: 'auto' | 'enabled' | 'disabled';
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ 
@@ -25,7 +27,9 @@ const Dashboard: React.FC<DashboardProps> = ({
   players = [], 
   user, 
   currentUserRole, 
-  onPageChange 
+  onPageChange,
+  isChristmasThemeActive = false,
+  christmasThemeMode = 'auto'
 }) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const [prices, setPrices] = useState(() => {
@@ -579,6 +583,39 @@ const Dashboard: React.FC<DashboardProps> = ({
     <div className="flex flex-col w-full max-w-3xl mx-auto pb-6 gap-4 animate-fade-in">
       {/* BANNER DE INSTALAÇÃO DO APP (EXIBIDO APENAS SE NÃO ESTIVER INSTALADO DE FORMA CORRETA) */}
       <PWAInstallButton variant="banner" />
+
+      {/* BANNER FESTIVO DO TEMA NATALINO */}
+      {isChristmasThemeActive && (
+        <div className="w-full rounded-2xl bg-gradient-to-r from-[#7f1d1d] via-[#14532d] to-[#0f172a] border border-amber-400/40 p-3.5 sm:p-4 text-white shadow-md flex items-center justify-between gap-3 relative overflow-hidden">
+          {/* Luzes decorativas de fundo */}
+          <div className="absolute top-0 right-0 -mr-6 -mt-6 w-24 h-24 bg-amber-400/20 rounded-full blur-xl pointer-events-none" />
+          <div className="flex items-center gap-3 min-w-0 z-10">
+            <span className="text-2xl sm:text-3xl shrink-0">🎅</span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                  🎄 Clima de Fim de Ano
+                </span>
+                <span className="text-[11px] font-bold text-emerald-300">Boas Festas!</span>
+              </div>
+              <p className="text-xs text-white/95 font-medium mt-0.5 truncate">
+                Ousadia & Alegria F.C. • Edição Festiva de Dezembro
+              </p>
+            </div>
+          </div>
+          {isCurrentUserAdmin && (
+            <button
+              type="button"
+              onClick={() => onPageChange(Page.Profile)}
+              className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 shrink-0 z-10 active:scale-95 transition-all cursor-pointer flex items-center gap-1"
+              title="Configurar tema natalino nas configurações"
+            >
+              <span>⚙️</span>
+              <span className="hidden sm:inline">Ajustar</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* BANNER DE LEMBRETE DE VÉSPERA PARA ATLETAS COM STATUS PENDENTE */}
       {!isConfirmed && !isRefused && (

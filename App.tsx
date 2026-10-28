@@ -108,20 +108,32 @@ const App: React.FC = () => {
   const prevPlayersState = useRef<Record<string, Player>>({});
   const lastNotificationId = useRef<string | null>(null);
 
-  // Listener para status global de Manutenção
+  const [christmasThemeMode, setChristmasThemeMode] = useState<'auto' | 'enabled' | 'disabled'>('auto');
+
+  // Listener para status global de Manutenção e Tema Natalino
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "settings", "system"), (snap) => {
       if (snap.exists()) {
         const d = snap.data();
         setIsMaintenance(!!d?.isMaintenance);
+        if (d?.christmasThemeMode === 'enabled' || d?.christmasThemeMode === 'disabled' || d?.christmasThemeMode === 'auto') {
+          setChristmasThemeMode(d.christmasThemeMode);
+        } else {
+          setChristmasThemeMode('auto');
+        }
       } else {
         setIsMaintenance(false);
+        setChristmasThemeMode('auto');
       }
     }, () => {
       setIsMaintenance(false);
+      setChristmasThemeMode('auto');
     });
     return () => unsub();
   }, []);
+
+  const isDecember = new Date().getMonth() === 11;
+  const isChristmasThemeActive = christmasThemeMode === 'enabled' || (christmasThemeMode === 'auto' && isDecember);
 
   // Persistir página atual
   useEffect(() => {
@@ -600,7 +612,13 @@ const App: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <Layout currentPage={activePage} onPageChange={setCurrentPage} currentUserRole={effectiveRole} currentUser={enrichedUser}>
+      <Layout 
+        currentPage={activePage} 
+        onPageChange={setCurrentPage} 
+        currentUserRole={effectiveRole} 
+        currentUser={enrichedUser}
+        isChristmasThemeActive={isChristmasThemeActive}
+      >
       {isMaintenance && isAdmin && (
         <div className="bg-amber-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-between z-50 sticky top-0 shadow-md flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -639,7 +657,17 @@ const App: React.FC = () => {
       <div className="animate-fade-in h-full">
         {!user && <Login onDirectLogin={handleDirectLogin} />}
         {user && activePage === Page.Onboarding && <Onboarding user={user} onComplete={() => setCurrentPage(Page.Dashboard)} />}
-        {user && activePage === Page.Dashboard && <Dashboard match={currentMatch} players={players} user={user} currentUserRole={effectiveRole} onPageChange={setCurrentPage} />}
+        {user && activePage === Page.Dashboard && (
+          <Dashboard 
+            match={currentMatch} 
+            players={players} 
+            user={user} 
+            currentUserRole={effectiveRole} 
+            onPageChange={setCurrentPage} 
+            isChristmasThemeActive={isChristmasThemeActive}
+            christmasThemeMode={christmasThemeMode}
+          />
+        )}
         {user && activePage === Page.PlayerList && <PlayerList players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
         {user && activePage === Page.Ranking && <Ranking players={players} currentUser={user} onPageChange={setCurrentPage} />}
         {user && activePage === Page.Finance && <Finance players={players} currentUser={user} match={currentMatch} onPageChange={setCurrentPage} />}
@@ -653,6 +681,8 @@ const App: React.FC = () => {
             currentUser={user}
             currentUserEmail={user?.email} 
             isMaintenance={isMaintenance}
+            christmasThemeMode={christmasThemeMode}
+            isChristmasThemeActive={isChristmasThemeActive}
             onPageChange={setCurrentPage} 
             onLogout={handleLogout}
             onPreviewMaintenance={() => setAdminPreviewMaintenance(true)}

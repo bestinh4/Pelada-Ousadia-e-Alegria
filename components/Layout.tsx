@@ -2,6 +2,7 @@ import React from 'react';
 import { Page } from '../types.ts';
 import { MAIN_LOGO_URL } from '../constants.tsx';
 import { PWAInstallButton } from './PWAInstallButton.tsx';
+import { SnowEffect } from './SnowEffect.tsx';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -9,6 +10,7 @@ interface LayoutProps {
   onPageChange: (page: Page) => void;
   currentUserRole?: 'admin' | 'player';
   currentUser?: any;
+  isChristmasThemeActive?: boolean;
 }
 
 const getPageTitle = (page: Page): string => {
@@ -38,7 +40,8 @@ const Layout: React.FC<LayoutProps> = ({
   currentPage, 
   onPageChange, 
   currentUserRole,
-  currentUser 
+  currentUser,
+  isChristmasThemeActive = false
 }) => {
   if (currentPage === Page.Login || currentPage === Page.Onboarding) {
     return <>{children}</>;
@@ -48,16 +51,28 @@ const Layout: React.FC<LayoutProps> = ({
   const pageTitle = getPageTitle(currentPage);
 
   return (
-    <div className="bg-surface dot-matrix-bg text-on-surface font-body-md text-body-md flex flex-col min-h-screen overflow-x-hidden">
+    <div className={`bg-surface dot-matrix-bg text-on-surface font-body-md text-body-md flex flex-col min-h-screen overflow-x-hidden ${isChristmasThemeActive ? 'theme-christmas' : ''}`}>
+      {/* Efeito sutil de neve quando o tema de natal estiver ativo */}
+      {isChristmasThemeActive && <SnowEffect />}
+
       {/* FIXED TOP HEADER */}
-      <header className="fixed top-0 left-0 right-0 z-50 pt-safe bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border-b border-surface-container-high/40">
+      <header className={`fixed top-0 left-0 right-0 z-50 pt-safe bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)] border-b ${isChristmasThemeActive ? 'border-amber-400/30' : 'border-surface-container-high/40'}`}>
         <div className="h-14 sm:h-16 px-3 sm:px-6 max-w-5xl mx-auto flex items-center justify-between w-full gap-2">
           {/* Brand Lockup with Real Logo */}
           <div 
             onClick={() => onPageChange(Page.Dashboard)}
             className="flex items-center gap-2.5 cursor-pointer select-none active:scale-[0.98] transition-transform duration-150 group min-w-0"
           >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep p-[2px] flex items-center justify-center shadow-sm shrink-0">
+            <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${isChristmasThemeActive ? 'bg-gradient-to-br from-rose-500 via-amber-400 to-emerald-700' : 'bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep'} p-[2px] flex items-center justify-center shadow-sm shrink-0 relative`}>
+              {/* Gorrinho de Papai Noel sobre o escudo */}
+              {isChristmasThemeActive && (
+                <span 
+                  className="absolute -top-3.5 -left-2.5 z-20 text-[20px] filter drop-shadow select-none pointer-events-none transform -rotate-12"
+                  title="Ousadia & Alegria - Edição Especial de Natal!"
+                >
+                  🎅
+                </span>
+              )}
               <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center p-1 overflow-hidden">
                 <img 
                   src={MAIN_LOGO_URL} 
@@ -68,11 +83,12 @@ const Layout: React.FC<LayoutProps> = ({
               </div>
             </div>
             <div className="flex flex-col min-w-0">
-              <span className="font-headline-sm sm:font-headline-lg-mobile text-sm sm:text-base text-navy-deep font-bold leading-none tracking-wide truncate">
-                OUSADIA & ALEGRIA
+              <span className="font-headline-sm sm:font-headline-lg-mobile text-sm sm:text-base text-navy-deep font-bold leading-none tracking-wide truncate flex items-center gap-1">
+                <span>OUSADIA & ALEGRIA</span>
+                {isChristmasThemeActive && <span className="text-xs">🎄</span>}
               </span>
               <span className="font-label-md text-[11px] text-outline leading-none mt-1 truncate">
-                {pageTitle}
+                {isChristmasThemeActive ? `🎅 ${pageTitle} • Especial de Fim de Ano` : pageTitle}
               </span>
             </div>
           </div>

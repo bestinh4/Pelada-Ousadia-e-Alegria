@@ -10,13 +10,26 @@ const Profile: React.FC<{
   currentUser?: any;
   currentUserEmail?: string; 
   isMaintenance?: boolean;
+  christmasThemeMode?: 'auto' | 'enabled' | 'disabled';
+  isChristmasThemeActive?: boolean;
   onPageChange: (page: Page) => void;
   onLogout?: () => void;
   onPreviewMaintenance?: () => void;
-}> = ({ player, currentUser, currentUserEmail, isMaintenance = false, onPageChange, onLogout, onPreviewMaintenance }) => {
+}> = ({ 
+  player, 
+  currentUser, 
+  currentUserEmail, 
+  isMaintenance = false, 
+  christmasThemeMode = 'auto',
+  isChristmasThemeActive = false,
+  onPageChange, 
+  onLogout, 
+  onPreviewMaintenance 
+}) => {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isTogglingMaintenance, setIsTogglingMaintenance] = useState(false);
+  const [isUpdatingChristmas, setIsUpdatingChristmas] = useState(false);
   const [editedName, setEditedName] = useState(player.name);
   const [editedPosition, setEditedPosition] = useState(player.position);
   const [editedPlayerType, setEditedPlayerType] = useState(player.playerType || 'avulso');
@@ -357,6 +370,138 @@ const Profile: React.FC<{
               <span>Testar Notificação Agora (com Vibração)</span>
             </button>
           </div>
+
+          {/* DIRETORIA / ADMIN: CONTROLE DO TEMA NATALINO DE DEZEMBRO */}
+          {isAdm && (
+            <div className="w-full bg-surface-container-lowest p-space-md rounded-2xl shadow-sm border border-emerald-500/40 relative overflow-hidden flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm text-xl">
+                    🎅
+                  </div>
+                  <div className="min-w-0">
+                    <h5 className="font-headline-sm text-headline-sm text-navy-deep font-bold flex items-center gap-1.5 flex-wrap">
+                      <span>Tema Natalino de Dezembro</span>
+                      <span className="text-[10px] uppercase font-bold bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded">
+                        DIRETORIA
+                      </span>
+                    </h5>
+                    <p className="font-body-sm text-xs text-outline leading-tight mt-0.5">
+                      Gorro no escudo 🎅, neve suave flutuando ❄️ e clima festivo de fim de ano para a galera.
+                    </p>
+                  </div>
+                </div>
+
+                <div className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${
+                  isChristmasThemeActive
+                    ? 'bg-gradient-to-r from-rose-600 to-emerald-600 text-white shadow-xs animate-pulse'
+                    : 'bg-surface-container text-outline'
+                }`}>
+                  <span>{isChristmasThemeActive ? '🎄 ATIVO' : 'DESLIGADO'}</span>
+                  {christmasThemeMode === 'auto' && <span className="text-[10px] opacity-80">(Auto)</span>}
+                  {christmasThemeMode === 'enabled' && <span className="text-[10px] opacity-80">(Teste)</span>}
+                </div>
+              </div>
+
+              {/* Botões de Ação para o ADM */}
+              <div className="pt-2 border-t border-surface-container-high/40 flex flex-col gap-2">
+                <p className="text-[11px] font-bold text-outline uppercase tracking-wider">
+                  Configuração de Exibição:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    disabled={isUpdatingChristmas}
+                    onClick={async () => {
+                      setIsUpdatingChristmas(true);
+                      try {
+                        await setDoc(doc(db, "settings", "system"), { 
+                          christmasThemeMode: 'enabled',
+                          updatedAt: new Date().toISOString() 
+                        }, { merge: true });
+                      } catch {
+                        alert("Erro ao ativar tema natalino.");
+                      } finally {
+                        setIsUpdatingChristmas(false);
+                      }
+                    }}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer ${
+                      christmasThemeMode === 'enabled'
+                        ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-400'
+                        : 'bg-surface-container hover:bg-surface-container-high text-navy-deep'
+                    }`}
+                    title="Forçar o tema ativo imediatamente para testar ou antecipar o clima de Natal"
+                  >
+                    <span>🎄</span>
+                    <span>Testar Agora</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isUpdatingChristmas}
+                    onClick={async () => {
+                      setIsUpdatingChristmas(true);
+                      try {
+                        await setDoc(doc(db, "settings", "system"), { 
+                          christmasThemeMode: 'auto',
+                          updatedAt: new Date().toISOString() 
+                        }, { merge: true });
+                      } catch {
+                        alert("Erro ao configurar modo automático.");
+                      } finally {
+                        setIsUpdatingChristmas(false);
+                      }
+                    }}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer ${
+                      christmasThemeMode === 'auto'
+                        ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400'
+                        : 'bg-surface-container hover:bg-surface-container-high text-navy-deep'
+                    }`}
+                    title="Ativa automaticamente em 1º de dezembro e desativa em 1º de janeiro"
+                  >
+                    <span>⚡</span>
+                    <span>Automático (Dez)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isUpdatingChristmas}
+                    onClick={async () => {
+                      setIsUpdatingChristmas(true);
+                      try {
+                        await setDoc(doc(db, "settings", "system"), { 
+                          christmasThemeMode: 'disabled',
+                          updatedAt: new Date().toISOString() 
+                        }, { merge: true });
+                      } catch {
+                        alert("Erro ao desativar tema natalino.");
+                      } finally {
+                        setIsUpdatingChristmas(false);
+                      }
+                    }}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all cursor-pointer ${
+                      christmasThemeMode === 'disabled'
+                        ? 'bg-slate-700 text-white shadow-sm ring-2 ring-slate-400'
+                        : 'bg-surface-container hover:bg-surface-container-high text-navy-deep'
+                    }`}
+                    title="Manter desligado"
+                  >
+                    <span>✕</span>
+                    <span>Desativar</span>
+                  </button>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-surface-container-low text-[11px] text-outline flex items-center gap-2">
+                  <span className="text-base">ℹ️</span>
+                  <span>
+                    {christmasThemeMode === 'enabled' && 'O tema está FORÇADO ATIVO para todos os usuários (modo de teste).'}
+                    {christmasThemeMode === 'auto' && 'O tema entrará AUTOMATICAMENTE no dia 1º de dezembro e ficará ativo até 31 de dezembro.'}
+                    {christmasThemeMode === 'disabled' && 'O tema está DESATIVADO e não será exibido mesmo em dezembro.'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* MASTER ADMIN: MODO MANUTENÇÃO */}
           {isMaster && (
