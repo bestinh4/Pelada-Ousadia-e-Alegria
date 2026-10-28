@@ -106,6 +106,12 @@ export async function urlOrBase64ToFile(url: string, filename = 'time-da-semana.
 }
 
 function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  if (typeof (ctx as any).roundRect === 'function') {
+    ctx.beginPath();
+    (ctx as any).roundRect(x, y, w, h, r);
+    ctx.closePath();
+    return;
+  }
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -115,14 +121,14 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.closePath();
 }
 
-// Gera o arquivo da foto com os nomes dos atletas marcados incorporados na imagem
+// Gera o arquivo da foto com tratamento gráfico profissional, enquadramento esportivo e todos os atletas marcados
 export async function generatePhotoWithTaggedAthletes(
   photoUrl: string,
   teamName: string,
   athleteNames: string[],
   matchDate?: string
 ): Promise<File> {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     const fallbackToFile = async () => {
       try {
         const f = await urlOrBase64ToFile(photoUrl, 'time-da-semana-ousadia-alegria.jpg');
@@ -132,8 +138,15 @@ export async function generatePhotoWithTaggedAthletes(
       }
     };
 
-    // Timeout de segurança de 2.5s para NUNCA travar
-    const timer = setTimeout(fallbackToFile, 2500);
+    // Timeout de segurança de 3.5s para garantir que nunca fique travado
+    const timer = setTimeout(fallbackToFile, 3500);
+
+    // Carregar fontes esportivas do sistema se suportado
+    try {
+      if (typeof document !== 'undefined' && document.fonts) {
+        await document.fonts.ready;
+      }
+    } catch {}
 
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -141,11 +154,10 @@ export async function generatePhotoWithTaggedAthletes(
     img.onload = () => {
       clearTimeout(timer);
       try {
-        const canvas = document.createElement('canvas');
         const origW = img.naturalWidth || img.width || 1200;
         const origH = img.naturalHeight || img.height || 900;
 
-        // Limitar resolução razoável para envio no WhatsApp (máx 1600px)
+        // Limitar resolução razoável para envio no WhatsApp (máx 1600px na maior dimensão para altíssima nitidez)
         let scale = 1;
         if (origW > 1600 || origH > 1600) {
           scale = 1600 / Math.max(origW, origH);
@@ -153,65 +165,309 @@ export async function generatePhotoWithTaggedAthletes(
         const W = Math.round(origW * scale);
         const H = Math.round(origH * scale);
 
-        // Altura proporcional da faixa de atletas
-        const bannerH = athleteNames.length > 0 ? Math.round(Math.max(80, H * 0.12)) : 0;
+        // Fator de escala proporcional calibrado para largura padrão de 1080px
+        const s = Math.max(0.72, Math.min(1.45, W / 1080));
+        const padX = Math.round(36 * s);
 
+        const fontHeading = `'Bebas Neue', 'Barlow Condensed', 'Impact', sans-serif`;
+        const fontBody = `'Plus Jakarta Sans', system-ui, -apple-system, sans-serif`;
+
+        // Canvas preliminar para medição precisa de todos os elementos antes de renderizar
+        const measureCanvas = document.createElement('canvas');
+        const mctx = measureCanvas.getContext('2d');
+        if (!mctx) return fallbackToFile();
+
+        // 1. Medir badges superiores
+        const badgeH = Math.round(32 * s);
+        const badgeRadius = Math.round(badgeH / 2);
+        const badgePadX = Math.round(14 * s);
+
+        const leftBadgeText = `🏆 TIME DA SEMANA${matchDate ? ` • ${matchDate}` : ''}`;
+        mctx.font = `bold ${Math.round(13 * s)}px ${fontBody}`;
+        const leftBadgeW = Math.round(mctx.measureText(leftBadgeText).width + badgePadX * 2);
+
+        const rightBadgeText = '📸 @pelada_ousadia_alegria';
+        mctx.font = `800 ${Math.round(12.5 * s)}px ${fontBody}`;
+        const rightBadgeW = Math.round(mctx.measureText(rightBadgeText).width + badgePadX * 2);
+
+        // Verificar se os dois badges cabem lado a lado sem risco de colisão
+        const canFitBadgesSameRow = (leftBadgeW + rightBadgeW + padX * 2 + Math.round(16 * s)) <= W;
+        const headerRowH = canFitBadgesSameRow ? badgeH : (badgeH * 2 + Math.round(8 * s));
+
+        // 2. Medir Título do Time (ajuste gradual se o nome for muito longo)
+        let teamFontSize = Math.round(38 * s);
+        mctx.font = `900 ${teamFontSize}px ${fontHeading}`;
+        const cleanTeamName = `⭐ ${teamName.toUpperCase().trim() || 'CAMPEÕES DA PELADA'}`;
+        while (teamFontSize > 20 * s && mctx.measureText(cleanTeamName).width > W - padX * 2) {
+          teamFontSize -= 2;
+          mctx.font = `900 ${teamFontSize}px ${fontHeading}`;
+        }
+        const teamTitleH = Math.round(teamFontSize * 1.15);
+
+        // 3. Medir e empacotar os chips dos Atletas com quebra de linha inteligente
+        interface ChipItem {
+          name: string;
+          w: number;
+        }
+
+        const chipH = Math.round(34 * s);
+        const chipGapX = Math.round(8 * s);
+        const chipGapY = Math.round(8 * s);
+        const chipPadInnerX = Math.round(12 * s);
+        const chipFontSize = Math.round(13 * s);
+        mctx.font = `bold ${chipFontSize}px ${fontBody}`;
+
+        const validAthletes = athleteNames.filter(n => Boolean(n && n.trim()));
+        const chips: ChipItem[] = validAthletes.map(name => {
+          const tw = mctx.measureText(name).width;
+          const w = Math.min(W - padX * 2, Math.round(tw + chipPadInnerX * 2 + 20 * s));
+          return { name, w };
+        });
+
+        const chipLines: ChipItem[][] = [];
+        let curLine: ChipItem[] = [];
+        let curLineW = 0;
+        const maxLineWidth = W - padX * 2;
+
+        for (const chip of chips) {
+          const needed = curLine.length === 0 ? chip.w : (curLineW + chipGapX + chip.w);
+          if (needed <= maxLineWidth) {
+            curLine.push(chip);
+            curLineW = needed;
+          } else {
+            if (curLine.length > 0) chipLines.push(curLine);
+            curLine = [chip];
+            curLineW = chip.w;
+          }
+        }
+        if (curLine.length > 0) chipLines.push(curLine);
+
+        const labelH = validAthletes.length > 0 ? Math.round(22 * s) : 0;
+        const chipsTotalH = chipLines.length > 0 ? (chipLines.length * chipH + (chipLines.length - 1) * chipGapY) : 0;
+
+        // 4. Rodapé e espaçamentos equilibrados
+        const footerH = Math.round(34 * s);
+        const padTop = Math.round(24 * s);
+        const padBottom = Math.round(22 * s);
+        const sectionGap = Math.round(14 * s);
+
+        const bannerH = padTop 
+          + headerRowH 
+          + sectionGap 
+          + teamTitleH 
+          + (validAthletes.length > 0 ? (sectionGap + labelH + chipsTotalH) : 0)
+          + sectionGap 
+          + footerH 
+          + padBottom;
+
+        // Criar canvas final com resolução precisa
+        const canvas = document.createElement('canvas');
         canvas.width = W;
         canvas.height = H + bannerH;
         const ctx = canvas.getContext('2d');
         if (!ctx) return fallbackToFile();
 
-        // 1. Desenhar a foto original sem cortes
+        // 1. Desenhar a foto oficial inteira sem nenhum corte
         ctx.drawImage(img, 0, 0, W, H);
 
-        // 2. Se houver atletas marcados, desenhar a faixa inferior informativa
-        if (bannerH > 0 && athleteNames.length > 0) {
-          // Fundo escuro com gradiente elegante
-          const grad = ctx.createLinearGradient(0, H, 0, H + bannerH);
-          grad.addColorStop(0, '#060d1f');
-          grad.addColorStop(1, '#020617');
-          ctx.fillStyle = grad;
-          ctx.fillRect(0, H, W, bannerH);
+        // 2. Fundo sofisticado do rodapé (Gradiente estádio azul marinho noite profunda)
+        const bgGrad = ctx.createLinearGradient(0, H, 0, H + bannerH);
+        bgGrad.addColorStop(0, '#040814');
+        bgGrad.addColorStop(0.25, '#071228');
+        bgGrad.addColorStop(0.65, '#050c1e');
+        bgGrad.addColorStop(1, '#02050e');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, H, W, bannerH);
 
-          // Linha divisória dourada
-          ctx.fillStyle = '#f59e0b';
-          ctx.fillRect(0, H, W, Math.max(3, Math.round(H * 0.005)));
-
-          const fontSizeTitle = Math.max(13, Math.round(bannerH * 0.22));
-          const fontSizeNames = Math.max(15, Math.round(bannerH * 0.32));
-
-          // Linha 1: Nome do Time e Pelada
-          ctx.fillStyle = '#f59e0b';
-          ctx.font = `900 ${fontSizeTitle}px sans-serif`;
-          ctx.textAlign = 'left';
-          const title = `🏆 ${teamName.toUpperCase()} • OUSADIA & ALEGRIA F.C.${matchDate ? ` (${matchDate})` : ''}`;
-          ctx.fillText(title, 20, H + Math.round(bannerH * 0.38));
-
-          // Linha 2: Atletas Marcados
-          ctx.fillStyle = '#ffffff';
-          ctx.font = `bold ${fontSizeNames}px sans-serif`;
-          const rawNames = `👥 ${athleteNames.join(' • ')}`;
-          let printable = rawNames;
-          if (ctx.measureText(printable).width > W - 40) {
-            while (printable.length > 10 && ctx.measureText(printable + '...').width > W - 40) {
-              printable = printable.slice(0, -1);
-            }
-            printable += '...';
+        // Marca d'água quadriculada croata sutil no fundo
+        const patternSquare = Math.round(14 * s);
+        for (let r = 0; r < 4; r++) {
+          for (let c = 0; c < 6; c++) {
+            const isRed = (r + c) % 2 === 0;
+            ctx.fillStyle = isRed ? 'rgba(220, 38, 38, 0.05)' : 'rgba(255, 255, 255, 0.04)';
+            ctx.fillRect(W - (6 - c) * patternSquare, H + bannerH - (4 - r) * patternSquare, patternSquare, patternSquare);
           }
-          ctx.fillText(printable, 20, H + Math.round(bannerH * 0.78));
-
-          // Selo do Instagram no canto direito
-          ctx.textAlign = 'right';
-          ctx.fillStyle = '#f43f5e';
-          ctx.font = `bold ${fontSizeTitle}px sans-serif`;
-          ctx.fillText('📸 @pelada_ousadia_alegria', W - 20, H + Math.round(bannerH * 0.38));
         }
+
+        // 3. Divisória metálica dourada de alto impacto no topo do rodapé
+        const dividerH = Math.max(3, Math.round(4 * s));
+        const goldGrad = ctx.createLinearGradient(0, 0, W, 0);
+        goldGrad.addColorStop(0, '#78350f');
+        goldGrad.addColorStop(0.15, '#d97706');
+        goldGrad.addColorStop(0.5, '#fef08a');
+        goldGrad.addColorStop(0.85, '#d97706');
+        goldGrad.addColorStop(1, '#78350f');
+        ctx.fillStyle = goldGrad;
+        ctx.fillRect(0, H, W, dividerH);
+
+        // 4. Renderizar Badges Superiores (Sem qualquer risco de sobreposição)
+        let curY = H + padTop;
+        if (canFitBadgesSameRow) {
+          // Left Badge (Time da Semana)
+          drawRoundedRect(ctx, padX, curY, leftBadgeW, badgeH, badgeRadius);
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.14)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.55)';
+          ctx.lineWidth = Math.max(1, Math.round(1.5 * s));
+          ctx.stroke();
+
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = `bold ${Math.round(13 * s)}px ${fontBody}`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(leftBadgeText, padX + badgePadX, curY + badgeH / 2);
+
+          // Right Badge (Instagram Oficial)
+          const rightX = W - padX - rightBadgeW;
+          drawRoundedRect(ctx, rightX, curY, rightBadgeW, badgeH, badgeRadius);
+          const instaGrad = ctx.createLinearGradient(rightX, 0, rightX + rightBadgeW, 0);
+          instaGrad.addColorStop(0, '#f09433');
+          instaGrad.addColorStop(0.5, '#dc2743');
+          instaGrad.addColorStop(1, '#bc1888');
+          ctx.fillStyle = instaGrad;
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.lineWidth = Math.max(1, Math.round(1.5 * s));
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = `800 ${Math.round(12.5 * s)}px ${fontBody}`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(rightBadgeText, rightX + badgePadX, curY + badgeH / 2);
+
+          curY += badgeH + sectionGap;
+        } else {
+          // Stacked Badges quando a largura for estreita
+          drawRoundedRect(ctx, padX, curY, leftBadgeW, badgeH, badgeRadius);
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.14)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.55)';
+          ctx.lineWidth = Math.max(1, Math.round(1.5 * s));
+          ctx.stroke();
+
+          ctx.fillStyle = '#fbbf24';
+          ctx.font = `bold ${Math.round(13 * s)}px ${fontBody}`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(leftBadgeText, padX + badgePadX, curY + badgeH / 2);
+
+          curY += badgeH + Math.round(8 * s);
+
+          drawRoundedRect(ctx, padX, curY, rightBadgeW, badgeH, badgeRadius);
+          const instaGrad = ctx.createLinearGradient(padX, 0, padX + rightBadgeW, 0);
+          instaGrad.addColorStop(0, '#f09433');
+          instaGrad.addColorStop(0.5, '#dc2743');
+          instaGrad.addColorStop(1, '#bc1888');
+          ctx.fillStyle = instaGrad;
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.lineWidth = Math.max(1, Math.round(1.5 * s));
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = `800 ${Math.round(12.5 * s)}px ${fontBody}`;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(rightBadgeText, padX + badgePadX, curY + badgeH / 2);
+
+          curY += badgeH + sectionGap;
+        }
+
+        // 5. Renderizar Título da Equipe Campeã com tipografia esportiva e sombra de contraste
+        ctx.font = `900 ${teamFontSize}px ${fontHeading}`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+        ctx.shadowBlur = Math.round(8 * s);
+        ctx.shadowOffsetY = Math.round(3 * s);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(cleanTeamName, padX, curY);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+
+        curY += teamTitleH + (validAthletes.length > 0 ? sectionGap : 0);
+
+        // 6. Renderizar Seção dos Atletas Marcados como Chips Esportivos
+        if (validAthletes.length > 0) {
+          ctx.font = `800 ${Math.round(11.5 * s)}px ${fontBody}`;
+          ctx.fillStyle = '#f59e0b';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(`👥 ELENCO CAMPEÃO (${validAthletes.length} ATLETAS):`, padX, curY);
+
+          curY += labelH;
+
+          // Renderizar linhas de chips (Nenhum atleta é cortado)
+          for (const line of chipLines) {
+            let cx = padX;
+            for (const chip of line) {
+              drawRoundedRect(ctx, cx, curY, chip.w, chipH, Math.round(8 * s));
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+              ctx.fill();
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+              ctx.lineWidth = Math.max(1, Math.round(1 * s));
+              ctx.stroke();
+
+              // Ícone bola de futebol
+              ctx.font = `${Math.round(11.5 * s)}px sans-serif`;
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('⚽', cx + Math.round(10 * s), curY + chipH / 2);
+
+              // Nome do atleta em destaque
+              ctx.font = `bold ${chipFontSize}px ${fontBody}`;
+              ctx.fillStyle = '#ffffff';
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(chip.name, cx + Math.round(28 * s), curY + chipH / 2);
+
+              cx += chip.w + chipGapX;
+            }
+            curY += chipH + chipGapY;
+          }
+
+          curY -= chipGapY;
+          curY += sectionGap;
+        }
+
+        // 7. Rodapé de Assinatura Oficial (Linha fina + xadrez croata + texto)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padX, curY);
+        ctx.lineTo(W - padX, curY);
+        ctx.stroke();
+
+        const footerTextY = curY + Math.round(17 * s);
+
+        // Mini xadrez croata decorativo à esquerda e à direita
+        const sq = Math.max(4, Math.round(5.5 * s));
+        const drawCheckers = (startX: number, startY: number) => {
+          for (let r = 0; r < 2; r++) {
+            for (let c = 0; c < 3; c++) {
+              ctx.fillStyle = (r + c) % 2 === 0 ? '#dc2626' : '#ffffff';
+              ctx.fillRect(startX + c * sq, startY + r * sq, sq, sq);
+            }
+          }
+        };
+
+        drawCheckers(padX, footerTextY - sq);
+        drawCheckers(W - padX - sq * 3, footerTextY - sq);
+
+        ctx.font = `800 ${Math.round(11 * s)}px ${fontBody}`;
+        ctx.fillStyle = '#94a3b8';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🇭🇷 OUSADIA & ALEGRIA F.C. • O FUTEBOL DA QUARTA-FEIRA', W / 2, footerTextY);
 
         canvas.toBlob((blob) => {
           if (!blob) return fallbackToFile();
           resolve(new File([blob], 'time-da-semana-ousadia-alegria.jpg', { type: 'image/jpeg' }));
-        }, 'image/jpeg', 0.92);
-      } catch {
+        }, 'image/jpeg', 0.94);
+      } catch (drawErr) {
+        console.warn("Erro ao gerar arte com atletas:", drawErr);
         fallbackToFile();
       }
     };
@@ -1195,11 +1451,21 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         {/* Bottom bar */}
         <div className="flex flex-col items-center justify-center gap-2.5 pt-2 z-20" onClick={(e) => e.stopPropagation()}>
           {squadPlayers.length > 0 && (
-            <div className="w-full text-center px-4 py-2 rounded-xl bg-black/75 backdrop-blur-md border border-white/15 max-w-2xl mx-auto shadow-lg">
-              <span className="text-[11px] font-bold text-amber-300 mr-1.5 uppercase tracking-wider">👥 Atletas Marcados na Foto ({squadPlayers.length}):</span>
-              <span className="text-xs font-semibold text-white/95">
-                {squadPlayers.map(p => p.name).join(' • ')}
+            <div className="w-full text-center px-4 py-2.5 rounded-xl bg-black/80 backdrop-blur-md border border-amber-400/25 max-w-2xl mx-auto shadow-2xl flex flex-col gap-1.5">
+              <span className="text-[10px] font-black text-amber-300 uppercase tracking-wider">
+                👥 Atletas Marcados na Foto ({squadPlayers.length} Campeões)
               </span>
+              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                {squadPlayers.map(p => (
+                  <span
+                    key={p.id}
+                    className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-white/10 border border-white/15 text-xs font-bold text-white shadow-xs"
+                  >
+                    <span className="text-[10px]">⚽</span>
+                    <span>{p.name}</span>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
           <div className="flex items-center justify-center gap-2.5 flex-wrap">
@@ -1419,21 +1685,29 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
           {/* Faixa com atletas marcados estilo tag do Instagram sobre a foto */}
           {squadPlayers.length > 0 && (
             <div className="absolute bottom-2.5 left-2.5 right-2.5 z-20 pointer-events-none">
-              <div className="bg-black/80 backdrop-blur-md rounded-xl p-2 sm:p-2.5 border border-white/15 shadow-xl flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-base shrink-0">👥</span>
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase text-amber-300 tracking-wider">
-                      Atletas Marcados na Foto ({squadPlayers.length}):
-                    </p>
-                    <p className="text-xs font-bold text-white truncate">
-                      {squadPlayers.map(p => p.name).join(' • ')}
-                    </p>
+              <div className="bg-slate-950/85 backdrop-blur-md rounded-xl p-2.5 border border-amber-400/30 shadow-2xl flex flex-col gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-sm shrink-0">👥</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 truncate">
+                      Atletas Marcados na Foto ({squadPlayers.length})
+                    </span>
                   </div>
+                  <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 shrink-0">
+                    🏆 Campeões
+                  </span>
                 </div>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-white/20 text-white shrink-0 hidden sm:inline">
-                  🏆 Campeões
-                </span>
+                <div className="flex items-center gap-1.5 flex-wrap max-h-16 overflow-hidden">
+                  {squadPlayers.map(p => (
+                    <span
+                      key={p.id}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/10 border border-white/15 text-[11px] font-bold text-white shadow-xs"
+                    >
+                      <span className="text-[9px]">⚽</span>
+                      <span>{p.name}</span>
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           )}
