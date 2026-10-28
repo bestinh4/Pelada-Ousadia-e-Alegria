@@ -22,14 +22,14 @@ export const SnowEffect: React.FC = () => {
   });
 
   useEffect(() => {
-    const symbols = ['❄', '❅', '❆', '•'];
-    const flakes: Snowflake[] = Array.from({ length: 24 }).map((_, i) => ({
+    const symbols = ['❄', '❅', '❆', '✻', '•'];
+    const flakes: Snowflake[] = Array.from({ length: 26 }).map((_, i) => ({
       id: i,
       left: Math.random() * 98,
-      size: Math.round(11 + Math.random() * 12),
-      duration: +(5.5 + Math.random() * 7).toFixed(1),
-      delay: +(Math.random() * 6).toFixed(1),
-      drift: Math.round(-30 + Math.random() * 60),
+      size: Math.round(10 + Math.random() * 14),
+      duration: +(6 + Math.random() * 8).toFixed(1),
+      delay: +(Math.random() * 7).toFixed(1),
+      drift: Math.round(-35 + Math.random() * 70),
       opacity: +(0.35 + Math.random() * 0.5).toFixed(2),
       symbol: symbols[Math.floor(Math.random() * symbols.length)]
     }));
@@ -65,17 +65,17 @@ export const SnowEffect: React.FC = () => {
       <style>{`
         @keyframes oaSnowFall {
           0% {
-            transform: translateY(-20px) translateX(0);
+            transform: translateY(-20px) translateX(0) rotate(0deg);
             opacity: 0;
           }
           15% {
-            opacity: 0.85;
+            opacity: 0.9;
           }
-          90% {
+          85% {
             opacity: 0.8;
           }
           100% {
-            transform: translateY(105vh) translateX(var(--drift));
+            transform: translateY(105vh) translateX(var(--drift)) rotate(var(--rot));
             opacity: 0;
           }
         }
@@ -91,7 +91,7 @@ export const SnowEffect: React.FC = () => {
             key={flake.id}
             style={{
               position: 'absolute',
-              top: '-20px',
+              top: '-25px',
               left: `${flake.left}%`,
               fontSize: `${flake.size}px`,
               opacity: flake.opacity,
@@ -101,9 +101,11 @@ export const SnowEffect: React.FC = () => {
               animationIterationCount: 'infinite',
               animationDelay: `${flake.delay}s`,
               color: '#ffffff',
-              textShadow: '0 0 4px rgba(255, 255, 255, 0.8), 0 0 10px rgba(186, 230, 253, 0.6)',
+              textShadow: '0 0 4px rgba(255, 255, 255, 0.9), 0 0 8px rgba(186, 230, 253, 0.6)',
               willChange: 'transform, opacity',
-              ['--drift' as any]: `${flake.drift}px`
+              ['--drift' as any]: `${flake.drift}px`,
+              ['--rot' as any]: `${flake.id % 2 === 0 ? 180 : -180}deg`,
+              filter: flake.size < 12 ? 'blur(0.5px)' : 'none'
             }}
           >
             {flake.symbol}

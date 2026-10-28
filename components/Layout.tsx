@@ -3,6 +3,8 @@ import { Page } from '../types.ts';
 import { MAIN_LOGO_URL } from '../constants.tsx';
 import { PWAInstallButton } from './PWAInstallButton.tsx';
 import { SnowEffect } from './SnowEffect.tsx';
+import { SantaHat } from './SantaHat.tsx';
+import { ChristmasLights } from './ChristmasLights.tsx';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -64,15 +66,8 @@ const Layout: React.FC<LayoutProps> = ({
             className="flex items-center gap-2.5 cursor-pointer select-none active:scale-[0.98] transition-transform duration-150 group min-w-0"
           >
             <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${isChristmasThemeActive ? 'bg-gradient-to-br from-rose-500 via-amber-400 to-emerald-700' : 'bg-gradient-to-br from-amber-400 via-primary-container to-navy-deep'} p-[2px] flex items-center justify-center shadow-sm shrink-0 relative`}>
-              {/* Gorrinho de Papai Noel sobre o escudo */}
-              {isChristmasThemeActive && (
-                <span 
-                  className="absolute -top-3.5 -left-2.5 z-20 text-[20px] filter drop-shadow select-none pointer-events-none transform -rotate-12"
-                  title="Ousadia & Alegria - Edição Especial de Natal!"
-                >
-                  🎅
-                </span>
-              )}
+              {/* Gorro de Natal profissional vetorizado em SVG sobre o escudo */}
+              {isChristmasThemeActive && <SantaHat size="md" />}
               <div className="w-full h-full bg-white rounded-[10px] flex items-center justify-center p-1 overflow-hidden">
                 <img 
                   src={MAIN_LOGO_URL} 
@@ -83,12 +78,18 @@ const Layout: React.FC<LayoutProps> = ({
               </div>
             </div>
             <div className="flex flex-col min-w-0">
-              <span className="font-headline-sm sm:font-headline-lg-mobile text-sm sm:text-base text-navy-deep font-bold leading-none tracking-wide truncate flex items-center gap-1">
-                <span>OUSADIA & ALEGRIA</span>
-                {isChristmasThemeActive && <span className="text-xs">🎄</span>}
-              </span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-headline-sm sm:font-headline-lg-mobile text-sm sm:text-base text-navy-deep font-bold leading-none tracking-wide truncate">
+                  OUSADIA & ALEGRIA
+                </span>
+                {isChristmasThemeActive && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-gradient-to-r from-rose-600 to-emerald-600 text-white text-[9px] font-black uppercase tracking-wider shadow-2xs">
+                    Natal
+                  </span>
+                )}
+              </div>
               <span className="font-label-md text-[11px] text-outline leading-none mt-1 truncate">
-                {isChristmasThemeActive ? `🎅 ${pageTitle} • Especial de Fim de Ano` : pageTitle}
+                {isChristmasThemeActive ? `🎄 ${pageTitle} • Temporada Festiva` : pageTitle}
               </span>
             </div>
           </div>
@@ -126,6 +127,9 @@ const Layout: React.FC<LayoutProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Pisca-pisca natalino delicado pendurado na base do cabeçalho */}
+        {isChristmasThemeActive && <ChristmasLights />}
       </header>
 
       {/* MAIN VIEWPORT SCROLL AREA */}

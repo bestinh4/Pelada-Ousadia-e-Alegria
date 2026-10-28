@@ -9,6 +9,7 @@ interface CoverTeamSectionProps {
   user: any;
   currentUserRole?: 'admin' | 'player';
   variant?: 'full' | 'compact';
+  isChristmasThemeActive?: boolean;
 }
 
 // Ícone SVG vetorizado de alta fidelidade do Instagram
@@ -126,7 +127,8 @@ export async function generatePhotoWithTaggedAthletes(
   photoUrl: string,
   teamName: string,
   athleteNames: string[],
-  matchDate?: string
+  matchDate?: string,
+  isChristmasTheme = false
 ): Promise<File> {
   return new Promise(async (resolve) => {
     const fallbackToFile = async () => {
@@ -182,7 +184,9 @@ export async function generatePhotoWithTaggedAthletes(
         const badgeRadius = Math.round(badgeH / 2);
         const badgePadX = Math.round(14 * s);
 
-        const leftBadgeText = `🏆 TIME DA SEMANA${matchDate ? ` • ${matchDate}` : ''}`;
+        const leftBadgeText = isChristmasTheme 
+          ? `🏆 TIME DA SEMANA • EDIÇÃO DE NATAL 🎅` 
+          : `🏆 TIME DA SEMANA${matchDate ? ` • ${matchDate}` : ''}`;
         mctx.font = `bold ${Math.round(13 * s)}px ${fontBody}`;
         const leftBadgeW = Math.round(mctx.measureText(leftBadgeText).width + badgePadX * 2);
 
@@ -480,7 +484,8 @@ export async function generatePhotoWithTaggedAthletes(
 export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
   players = [],
   user,
-  currentUserRole
+  currentUserRole,
+  isChristmasThemeActive = false
 }) => {
   const [coverTeam, setCoverTeam] = useState<CoverTeam | null>(null);
   const [historyList, setHistoryList] = useState<CoverTeam[]>([]);
@@ -803,7 +808,8 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         coverTeam.photoUrl,
         coverTeam.teamName,
         athleteNames,
-        formattedMatchDate
+        formattedMatchDate,
+        isChristmasThemeActive
       );
 
       let canShareFiles = false;
@@ -885,7 +891,8 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         coverTeam.photoUrl,
         coverTeam.teamName,
         athleteNames,
-        formattedMatchDate
+        formattedMatchDate,
+        isChristmasThemeActive
       );
 
       if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
@@ -912,7 +919,8 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
         coverTeam.photoUrl,
         coverTeam.teamName,
         athleteNames,
-        formattedMatchDate
+        formattedMatchDate,
+        isChristmasThemeActive
       );
 
       const link = document.createElement('a');
@@ -1586,9 +1594,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
   }
 
   return (
-    <div className="w-full rounded-2xl sm:rounded-3xl bg-surface-container-lowest p-3.5 sm:p-5 shadow-[0_12px_36px_rgba(0,58,117,0.06)] border border-amber-400/30 overflow-hidden relative group">
+    <div className={`w-full rounded-2xl sm:rounded-3xl bg-surface-container-lowest p-3.5 sm:p-5 shadow-[0_12px_36px_rgba(0,58,117,0.06)] border ${isChristmasThemeActive ? 'border-amber-400/50 shadow-rose-950/10' : 'border-amber-400/30'} overflow-hidden relative group`}>
       {/* Detalhe superior brilhante */}
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 via-rose-500 to-purple-600" />
+      <div className={`absolute top-0 left-0 right-0 h-1.5 ${isChristmasThemeActive ? 'bg-gradient-to-r from-red-600 via-amber-400 to-emerald-600' : 'bg-gradient-to-r from-amber-400 via-rose-500 to-purple-600'}`} />
 
       {/* Header do Card */}
       <div className="flex items-center justify-between gap-2 pb-3 border-b border-surface-container-high/50 flex-wrap">
@@ -1598,9 +1606,9 @@ export const CoverTeamSection: React.FC<CoverTeamSectionProps> = ({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-label-md text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
-                <span>⭐</span>
-                <span>TIME DA SEMANA • RODADA ANTERIOR</span>
+              <span className={`px-2.5 py-0.5 rounded-full ${isChristmasThemeActive ? 'bg-gradient-to-r from-red-600 via-amber-500 to-emerald-700 text-white shadow-xs' : 'bg-amber-400 text-slate-950'} font-label-md text-[10px] font-black uppercase tracking-wider flex items-center gap-1`}>
+                <span>{isChristmasThemeActive ? '🎅' : '⭐'}</span>
+                <span>{isChristmasThemeActive ? 'TIME DA SEMANA • EDIÇÃO DE NATAL' : 'TIME DA SEMANA • RODADA ANTERIOR'}</span>
               </span>
               {formattedMatchDate && (
                 <span className="text-[11px] font-semibold text-outline">

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, Player, Page, PixConfig } from '../types.ts';
 import { db, doc, getDoc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query, where, orderBy, limit } from '../services/firebase.ts';
-import { MASTER_ADMIN_EMAIL } from '../constants.tsx';
+import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
 import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
@@ -11,6 +11,7 @@ import { getCurrentMonthKey, getMonthName, getMensalistaPaymentInfo, MENSALISTA_
 import { playSound, playWhistleSound } from '../utils/sound.ts';
 import { PWAInstallButton } from '../components/PWAInstallButton.tsx';
 import { CoverTeamSection } from '../components/CoverTeamSection.tsx';
+import { SantaHat } from '../components/SantaHat.tsx';
 
 interface DashboardProps {
   match: Match | null;
@@ -586,32 +587,47 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* BANNER FESTIVO DO TEMA NATALINO */}
       {isChristmasThemeActive && (
-        <div className="w-full rounded-2xl bg-gradient-to-r from-[#7f1d1d] via-[#14532d] to-[#0f172a] border border-amber-400/40 p-3.5 sm:p-4 text-white shadow-md flex items-center justify-between gap-3 relative overflow-hidden">
-          {/* Luzes decorativas de fundo */}
-          <div className="absolute top-0 right-0 -mr-6 -mt-6 w-24 h-24 bg-amber-400/20 rounded-full blur-xl pointer-events-none" />
+        <div className="w-full rounded-2xl bg-gradient-to-r from-[#881337] via-[#14532d] to-[#0f172a] border border-amber-400/40 p-3 sm:p-4 text-white shadow-md flex items-center justify-between gap-3 relative overflow-hidden animate-fade-in">
+          {/* Luzes e brilhos decorativos de fundo */}
+          <div className="absolute top-0 right-0 -mr-6 -mt-6 w-28 h-28 bg-amber-400/20 rounded-full blur-2xl pointer-events-none" />
+          <div className="absolute bottom-0 left-10 w-24 h-24 bg-emerald-500/15 rounded-full blur-xl pointer-events-none" />
+
           <div className="flex items-center gap-3 min-w-0 z-10">
-            <span className="text-2xl sm:text-3xl shrink-0">🎅</span>
+            {/* Escudo Oficial com o Gorro de Natal */}
+            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 via-rose-500 to-emerald-600 p-[2px] shadow-md shrink-0 relative">
+              <SantaHat size="md" />
+              <div className="w-full h-full bg-white rounded-[10px] p-1 flex items-center justify-center overflow-hidden">
+                <img
+                  src={MAIN_LOGO_URL}
+                  alt="O&A"
+                  className="w-full h-full object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </div>
+
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                <span className="px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-wider shadow-xs">
                   🎄 Clima de Fim de Ano
                 </span>
                 <span className="text-[11px] font-bold text-emerald-300">Boas Festas!</span>
               </div>
-              <p className="text-xs text-white/95 font-medium mt-0.5 truncate">
-                Ousadia & Alegria F.C. • Edição Festiva de Dezembro
+              <p className="text-xs text-white/95 font-semibold mt-0.5 truncate">
+                Ousadia & Alegria F.C. • Temporada Festiva de Dezembro
               </p>
             </div>
           </div>
+
           {isCurrentUserAdmin && (
             <button
               type="button"
               onClick={() => onPageChange(Page.Profile)}
-              className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 shrink-0 z-10 active:scale-95 transition-all cursor-pointer flex items-center gap-1"
-              title="Configurar tema natalino nas configurações"
+              className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold border border-white/25 shrink-0 z-10 active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+              title="Acessar configurações do tema natalino"
             >
               <span>⚙️</span>
-              <span className="hidden sm:inline">Ajustar</span>
+              <span className="hidden sm:inline">Configurar Tema</span>
             </button>
           )}
         </div>
@@ -1177,6 +1193,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         players={players}
         user={user}
         currentUserRole={currentUserRole}
+        isChristmasThemeActive={isChristmasThemeActive}
       />
 
       {/* MODAL DE PAGAMENTO PIX & VERIFICAÇÃO AUTOMÁTICA DE COMPROVANTE */}

@@ -13,6 +13,7 @@ import Profile from './pages/Profile.tsx';
 import TeamBalancing from './pages/TeamBalancing.tsx';
 import NotificationToast, { Notification as InAppNotification } from './components/NotificationToast.tsx';
 import { MaintenanceScreen } from './components/MaintenanceScreen.tsx';
+import { SantaHat } from './components/SantaHat.tsx';
 import { Page, Player, Match } from './types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from './constants.tsx';
 import { auth, db, loginWithGoogle, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, setDoc, getDocs, limit, where } from './services/firebase.ts';
@@ -568,7 +569,8 @@ const App: React.FC = () => {
               />
 
               {/* Moldura Oficial do Novo Escudo (Sem Fundo Preto) */}
-              <div className="w-36 h-36 sm:w-44 sm:h-44 rounded-[32px] bg-gradient-to-br from-amber-300 via-primary-container to-navy-deep p-[3px] shadow-[0_20px_60px_rgba(0,0,0,0.55)] relative z-10 shrink-0">
+              <div className={`w-36 h-36 sm:w-44 sm:h-44 rounded-[32px] ${isChristmasThemeActive ? 'bg-gradient-to-br from-rose-500 via-amber-300 to-emerald-700' : 'bg-gradient-to-br from-amber-300 via-primary-container to-navy-deep'} p-[3px] shadow-[0_20px_60px_rgba(0,0,0,0.55)] relative z-10 shrink-0`}>
+                {isChristmasThemeActive && <SantaHat size="xl" className="-top-12 -left-8" />}
                 <div className="w-full h-full bg-white rounded-[29px] p-2.5 flex items-center justify-center overflow-hidden">
                   <img
                     src={MAIN_LOGO_URL}
