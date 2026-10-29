@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment & Secrets
+.env
+.env*.local
+.env.production
+.env.development
+
+# Internal tooling
+.aistudio/

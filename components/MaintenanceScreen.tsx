@@ -43,28 +43,28 @@ export const MaintenanceScreen: React.FC<MaintenanceScreenProps> = ({ onCheckAga
           </div>
         </div>
 
-        {/* ILUSTRAÇÃO 3D: BONECOS COM OS NOVOS COLETES (AZUL X VERMELHO) */}
+        {/* ILUSTRAÇÃO 3D: BONECOS COM O NOVO UNIFORME OFICIAL (FRENTE E COSTAS) */}
         <div className="relative w-full rounded-2xl overflow-hidden shadow-lg border border-surface-container-high/60 group bg-surface-container">
           <img 
             src={MAINTENANCE_MASCOTS_IMG} 
-            alt="Mascotes com os novos coletes azul e vermelho da pelada"
+            alt="Mascotes 3D com o novo uniforme oficial do Ousadia & Alegria"
             className="w-full aspect-[4/3] object-cover transition-transform duration-700 group-hover:scale-105"
             referrerPolicy="no-referrer"
           />
           
-          {/* Overlay com informação dos novos coletes */}
+          {/* Overlay com informação do novo uniforme */}
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-navy-deep/95 via-navy-deep/75 to-transparent p-3 pt-8 flex items-center justify-between text-white">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <span className="px-2 py-0.5 rounded-full bg-blue-600/90 text-white font-label-md text-[10px] font-bold uppercase tracking-wider border border-white/20">
-                Colete Azul
+                Regata Azul
               </span>
-              <span className="text-[11px] font-bold text-amber-300">🆚</span>
+              <span className="text-[10px] text-white/70">+</span>
               <span className="px-2 py-0.5 rounded-full bg-red-600/90 text-white font-label-md text-[10px] font-bold uppercase tracking-wider border border-white/20">
-                Colete Vermelho
+                Calção Vermelho
               </span>
             </div>
-            <span className="text-[10px] text-white/80 font-medium">
-              Novos Mantos Oficiais
+            <span className="text-[10px] text-amber-300 font-semibold tracking-wide">
+              Manto Oficial 2026
             </span>
           </div>
         </div>

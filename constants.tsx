@@ -6,7 +6,7 @@ export const MASTER_ADMIN_EMAIL = 'diiogo49@gmail.com';
 
 export const MAIN_LOGO_URL = "/images/ousadia_alegria_crest.png?v=20";
 
-export const MAINTENANCE_MASCOTS_IMG = "/images/maintenance_mascots.jpg";
+export const MAINTENANCE_MASCOTS_IMG = "/images/maintenance_mascots.jpg?v=official_tiller";
 
 // Sem dados genéricos: o aplicativo carrega exclusivamente dados reais do banco
 export const MOCK_PLAYERS: Player[] = [];
