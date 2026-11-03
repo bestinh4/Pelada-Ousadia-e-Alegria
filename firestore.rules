@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ==========================================
+    // FUNÇÕES AUXILIARES DE AUTENTICAÇÃO E RBAC
+    // ==========================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isMasterAdmin() {
+      return isAuthenticated() && 
+        request.auth.token.email != null && 
+        request.auth.token.email.lower() == 'diiogo49@gmail.com';
+    }
+
+    function isAdmin() {
+      return isMasterAdmin() || (
+        isAuthenticated() && 
+        exists(/databases/$(database)/documents/players/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/players/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // ==========================================
+    // COLEÇÃO: PLAYERS (ATLETAS E PERFIS)
+    // ==========================================
+    match /players/{playerId} {
+      // Leitura permitida para atletas autenticados (escalação, ranking, lista de presença)
+      allow read: if isAuthenticated();
+
+      // Criação de perfil no onboarding
+      allow create: if isAuthenticated() && (
+        isOwner(playerId) || isAdmin()
+      ) && (
+        // Um atleta comum não pode se auto-promover a administrador na criação
+        !('role' in request.resource.data) || 
+        request.resource.data.role == 'player' || 
+        isMasterAdmin()
+      );
+
+      // Atualização de perfil
+      allow update: if isAuthenticated() && (
+        // Administrador pode atualizar qualquer campo
+        isAdmin() ||
+        // O próprio atleta atualizando seu perfil/status
+        (isOwner(playerId) && (
+          // Proteção contra elevação de privilégios: não pode alterar o campo 'role'
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
+           request.resource.data.role == resource.data.role) &&
+          // Não pode alterar multas diretamente
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['hasNoShowFine', 'hasLateRemovalFine', 'fineAmount']) ||
+           isAdmin())
+        ))
+      );
+
+      // Exclusão permitida apenas para administradores
+      allow delete: if isAdmin();
+    }
+
+    // ==========================================
+    // COLEÇÃO: MATCHES (CONVOCAÇÕES E PARTIDAS)
+    // ==========================================
+    match /matches/{matchId} {
+      allow read: if isAuthenticated();
+      allow create, delete: if isAdmin();
+      // Atualizações de presença ou configurações da partida
+      allow update: if isAuthenticated();
+    }
+
+    // ==========================================
+    // COLEÇÃO: SESSIONS (SORTEIO, TIMES E PLACAR)
+    // ==========================================
+    match /sessions/{sessionId} {
+      allow read: if isAuthenticated();
+      // Gerenciamento dos times da pelada é restrito a administradores
+      allow write: if isAdmin();
+    }
+
+    // ==========================================
+    // COLEÇÃO: SETTINGS (CONFIGURAÇÕES GERAIS)
+    // ==========================================
+    match /settings/{settingId} {
+      // CoverTeam e System podem ser lidos publicamente para preview social e manutenção
+      allow read: if isAuthenticated() || settingId == 'coverTeam' || settingId == 'system';
+      
+      // Apenas administradores alteram financeiro, manutenção ou time da capa
+      // Exceção: reminders pode ser sincronizado por rotina de sistema autenticada
+      allow write: if isAdmin() || (settingId == 'reminders' && isAuthenticated());
+    }
+
+    // ==========================================
+    // COLEÇÃO: RECEIPTS (COMPROVANTES PIX)
+    // ==========================================
+    match /receipts/{receiptId} {
+      // O atleta só lê seus próprios comprovantes; Diretoria lê todos para conferência
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.playerId == request.auth.uid);
+
+      // O atleta só pode registrar comprovante em seu próprio nome
+      allow create: if isAuthenticated() && (
+        request.resource.data.playerId == request.auth.uid || isAdmin()
+      );
+
+      // Alteração ou exclusão de comprovantes é restrita à Diretoria
+      allow update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // COLEÇÃO: EXPENSES (DESPESAS E CAIXA)
+    // ==========================================
+    match /expenses/{expenseId} {
+      // Acesso e gestão de despesas restrito à Diretoria
+      allow read, write: if isAdmin();
+    }
+
+    // ==========================================
+    // COLEÇÃO: NOTIFICATIONS (TRANSMISSÕES PUSH)
+    // ==========================================
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // COLEÇÃO: LATEREMOVALS (AUDITORIA DE MULTAS)
+    // ==========================================
+    match /lateRemovals/{removalId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // ==========================================
+    // BLOQUEIO PADRÃO: Menor privilégio
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

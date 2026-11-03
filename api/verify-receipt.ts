@@ -22,6 +22,7 @@ export interface VerifyReceiptOutput {
   receiptTime: string;
   summary: string;
   rejectionReason?: string;
+  requiresManualReview?: boolean;
 }
 
 export async function analyzeReceiptWithGemini(input: VerifyReceiptInput): Promise<VerifyReceiptOutput> {
@@ -183,28 +184,29 @@ Regras de validação:
     }
   }
 
-  // FALLBACK DE ALTA DISPONIBILIDADE:
+  // FALLBACK SEGURO:
   // Se a API do Gemini estiver em pico de demanda temporário (503 / 429) ou indisponível,
-  // NUNCA travar o atleta com mensagem de erro!
-  // Registra o comprovante anexado para auditoria manual pela Diretoria e aprova o pagamento.
-  console.warn("Aplicando fallback de alta disponibilidade para validação de comprovante:", lastErr?.message || lastErr);
+  // NUNCA aprovar automaticamente um pagamento não verificado!
+  // Registra o comprovante anexado para auditoria manual pela Diretoria, mantendo isApproved como false.
+  console.warn("Análise automática indisponível ou inconclusiva:", lastErr?.message || lastErr);
 
   const todayStr = new Date().toLocaleDateString('pt-BR');
   const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const expectedVal = Number(input.expectedAmount) || 40;
 
   return {
-    isValidReceipt: true,
-    isApproved: true,
+    isValidReceipt: false,
+    isApproved: false,
     isScheduled: false,
-    extractedAmount: expectedVal,
+    requiresManualReview: true,
+    extractedAmount: 0,
     payerName: input.playerName || "Atleta",
     receiverName: input.receiverName || "Ousadia & Alegria",
-    bankName: "Pix (Comprovante Anexado)",
+    bankName: "Comprovante Anexado",
     transactionId: "TX_" + Date.now().toString(36).toUpperCase(),
     receiptDate: todayStr,
     receiptTime: timeStr,
-    summary: `Comprovante de R$ ${expectedVal.toFixed(2)} anexado com sucesso • ${todayStr} às ${timeStr}`,
+    summary: `Comprovante anexado para conferência manual da Diretoria`,
+    rejectionReason: "Análise automática inconclusiva. O comprovante foi encaminhado para conferência manual da Diretoria.",
   };
 }
 
@@ -215,36 +217,52 @@ export default async function handler(req: any, res: any) {
 
   try {
     const { base64Data, mimeType, expectedAmount, receiverName, pixKey, playerName } = req.body || {};
-    if (!base64Data) {
-      return res.status(400).json({ error: "Comprovante não enviado." });
+    
+    // Validação estrita de entradas
+    if (!base64Data || typeof base64Data !== "string") {
+      return res.status(400).json({ error: "Arquivo de comprovante inválido ou ausente." });
     }
+
+    if (base64Data.length > 20 * 1024 * 1024) {
+      return res.status(413).json({ error: "Arquivo excede o limite máximo permitido de 20MB." });
+    }
+
+    const safeMimeType = typeof mimeType === "string" && (mimeType.startsWith("image/") || mimeType === "application/pdf")
+      ? mimeType
+      : "image/jpeg";
+
+    const safeExpectedAmount = Math.max(0, Math.min(10000, Number(expectedAmount) || 0));
 
     const result = await analyzeReceiptWithGemini({
       base64Data,
-      mimeType: mimeType || "image/jpeg",
-      expectedAmount: Number(expectedAmount) || 0,
-      receiverName,
-      pixKey,
-      playerName,
+      mimeType: safeMimeType,
+      expectedAmount: safeExpectedAmount,
+      receiverName: typeof receiverName === "string" ? receiverName.slice(0, 100) : undefined,
+      pixKey: typeof pixKey === "string" ? pixKey.slice(0, 100) : undefined,
+      playerName: typeof playerName === "string" ? playerName.slice(0, 100) : undefined,
     });
 
     return res.status(200).json(result);
   } catch (error: any) {
     console.error("Erro na verificação de comprovante:", error);
-    // Em caso de qualquer falha inesperada, retornar fallback de sucesso para não travar o atleta
-    const expectedVal = Number(req.body?.expectedAmount) || 40;
+    // Em caso de falha de execução, NUNCA aprovar automaticamente!
+    const todayStr = new Date().toLocaleDateString('pt-BR');
+    const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
     return res.status(200).json({
-      isValidReceipt: true,
-      isApproved: true,
+      isValidReceipt: false,
+      isApproved: false,
       isScheduled: false,
-      extractedAmount: expectedVal,
-      payerName: req.body?.playerName || "Atleta",
-      receiverName: req.body?.receiverName || "Ousadia & Alegria",
-      bankName: "Pix (Comprovante Anexado)",
+      requiresManualReview: true,
+      extractedAmount: 0,
+      payerName: typeof req.body?.playerName === "string" ? req.body.playerName.slice(0, 100) : "Atleta",
+      receiverName: typeof req.body?.receiverName === "string" ? req.body.receiverName.slice(0, 100) : "Ousadia & Alegria",
+      bankName: "Comprovante Anexado",
       transactionId: "TX_" + Date.now().toString(36).toUpperCase(),
-      receiptDate: new Date().toLocaleDateString('pt-BR'),
-      receiptTime: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      summary: `Comprovante anexado para a Diretoria • R$ ${expectedVal.toFixed(2)}`,
+      receiptDate: todayStr,
+      receiptTime: timeStr,
+      summary: `Comprovante salvo para conferência manual da Diretoria`,
+      rejectionReason: "Erro técnico na leitura automática. O comprovante foi salvo para validação manual da Diretoria.",
     });
   }
 }

@@ -245,22 +245,24 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         console.warn('Aviso na API de IA, prosseguindo com validação resiliente:', fetchErr);
       }
 
-      // Se a IA não retornou ou deu erro de leitura, usar fallback resiliente aprovado
+      // Se a IA não retornou ou deu erro de leitura, registrar como pendente de conferência manual (NUNCA auto-aprovar)
       if (!data || typeof data !== 'object') {
         const todayStr = new Date().toLocaleDateString('pt-BR');
         const timeStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
         data = {
-          isValidReceipt: true,
-          isApproved: true,
+          isValidReceipt: false,
+          isApproved: false,
           isScheduled: false,
-          extractedAmount: expectedAmount,
+          requiresManualReview: true,
+          extractedAmount: 0,
           payerName: player.name,
           receiverName: pixConfig.receiverName,
           bankName: 'Pix',
           transactionId: 'TX_' + Date.now().toString(36).toUpperCase(),
           receiptDate: todayStr,
           receiptTime: timeStr,
-          summary: `Comprovante de R$ ${expectedAmount.toFixed(2)} registrado • ${todayStr} às ${timeStr}`
+          summary: `Comprovante salvo para conferência manual da Diretoria`,
+          rejectionReason: 'Não foi possível ler o comprovante automaticamente. Ele foi enviado para conferência da Diretoria.'
         };
       }
 
@@ -336,7 +338,60 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         return;
       }
 
-      // Aprovado ou Anexado! Atualizar o status do atleta no Firestore e registrar o comprovante na coleção "receipts"
+      // Caso o comprovante NÃO tenha sido aprovado automaticamente:
+      if (!data.isApproved) {
+        // Se a leitura foi inconclusiva ou requer revisão manual, salvar na coleção receipts para a Diretoria conferir
+        if (data.requiresManualReview || !data.rejectionReason) {
+          const nowIso = new Date().toISOString();
+          await addDoc(collection(db, 'receipts'), {
+            playerId: player.id,
+            playerName: player.name,
+            playerPhoto: player.photoUrl || '',
+            playerType: player.playerType,
+            paymentType: isMensalista ? 'mensalista' : 'avulso',
+            expectedAmount,
+            extractedAmount: 0,
+            payerName: data.payerName || player.name,
+            receiverName: data.receiverName || pixConfig.receiverName,
+            bankName: data.bankName || 'Pix',
+            transactionId: cleanTxId || ('TX_' + Date.now().toString(36).toUpperCase()),
+            receiptDate: data.receiptDate || new Date().toLocaleDateString('pt-BR'),
+            receiptTime: data.receiptTime || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            summary: 'Aguardando conferência manual da Diretoria',
+            receiptPreviewUrl: previewDataUrl || '',
+            verifiedByAi: false,
+            status: 'pendente_conferencia',
+            matchId: match?.id || '',
+            matchDate: match?.date || '',
+            createdAt: nowIso
+          });
+
+          await setDoc(doc(db, 'players', player.id), {
+            lastReceiptSummary: 'Comprovante enviado • Em conferência pela Diretoria'
+          }, { merge: true });
+
+          setVerificationResult({
+            status: 'success',
+            title: 'Comprovante Enviado para a Diretoria! 📋',
+            message: 'A leitura automática foi inconclusiva. Seu comprovante foi salvo com sucesso e a Diretoria fará a baixa manual no Financeiro.',
+            details: 'Você pode acompanhar pelo painel da pelada assim que a Diretoria conferir.'
+          });
+          setIsVerifying(false);
+          return;
+        }
+
+        // Se o comprovante foi recusado (ex: valor menor, imagem inválida)
+        setVerificationResult({
+          status: 'error',
+          title: 'Comprovante Não Aprovado',
+          message: data.rejectionReason || 'O valor ou os dados do comprovante não coincidem com o valor da cobrança da pelada.',
+          details: data.summary
+        });
+        setIsVerifying(false);
+        return;
+      }
+
+      // APROVADO COM SEGURANÇA! Atualizar o status do atleta no Firestore e registrar na coleção "receipts"
       const nowIso = new Date().toISOString();
       const paymentType =
         !isBasePaid && hasFine && includeFine
@@ -368,6 +423,7 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         summary: data.summary || `Pix R$ ${finalAmount.toFixed(2)} confirmado`,
         receiptPreviewUrl: previewDataUrl || '',
         verifiedByAi: Boolean(data.verifiedByAi ?? true),
+        status: 'aprovado',
         matchId: match?.id || '',
         matchDate: match?.date || '',
         createdAt: nowIso
@@ -408,42 +464,12 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
       });
     } catch (err: any) {
       console.error('Erro ao processar comprovante:', err);
-      // Fallback final direto no Firestore para garantir que o atleta nunca fique desatualizado
-      try {
-        const nowIso = new Date().toISOString();
-        const playerUpdates: Record<string, any> = {
-          lastPaymentAt: nowIso,
-          lastPaymentAmount: expectedAmount,
-          lastReceiptSummary: `R$ ${expectedAmount.toFixed(2)} (Comprovante Anexado)`,
-          paymentStatus: 'pago',
-          paidMatchId: match?.id || '',
-          paidMatchDate: match?.date || ''
-        };
-        if (isMensalista) {
-          playerUpdates.monthlyPaid = true;
-          playerUpdates.monthlyPaidMonth = currentMonthKey;
-        }
-        if (hasFine) {
-          playerUpdates.hasNoShowFine = false;
-          playerUpdates.hasLateRemovalFine = false;
-          playerUpdates.fineAmount = 0;
-          playerUpdates.fineReason = null;
-        }
-        await setDoc(doc(db, 'players', player.id), playerUpdates, { merge: true });
-        playSound('cheer');
-        setVerificationResult({
-          status: 'success',
-          title: 'Comprovante Recebido! ✅',
-          message: `Seu comprovante foi enviado e seu status já foi alterado para PAGO na pelada! (Disponível para a Diretoria no Financeiro).`,
-          details: `Valor: R$ ${expectedAmount.toFixed(2)}`
-        });
-      } catch (finalErr) {
-        setVerificationResult({
-          status: 'error',
-          title: 'Erro de Conexão',
-          message: 'Não foi possível salvar o comprovante. Verifique sua conexão com a internet e tente novamente.'
-        });
-      }
+      // NUNCA marcar como pago em falha inesperada!
+      setVerificationResult({
+        status: 'error',
+        title: 'Falha no Processamento',
+        message: 'Não foi possível validar o comprovante no momento. Verifique sua conexão e tente enviar novamente, ou procure a Diretoria da pelada.'
+      });
     } finally {
       setIsVerifying(false);
     }

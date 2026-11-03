@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { db, doc, setDoc, auth, updateProfile } from '../services/firebase.ts';
 import { Page } from '../types.ts';
-import { MAIN_LOGO_URL } from '../constants.tsx';
+import { MAIN_LOGO_URL, MASTER_ADMIN_EMAIL } from '../constants.tsx';
 import { sendPushNotification, broadcastNotification } from '../services/notificationService.ts';
 
 interface OnboardingProps {
@@ -24,6 +24,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
     setIsSaving(true);
     try {
       const playerDocRef = doc(db, "players", user.uid);
+      const isMasterAdmin = user?.email && user.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase();
       await setDoc(playerDocRef, {
         id: user.uid,
         name: name.trim(),
@@ -36,7 +37,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
         playerType: 'avulso', // Definido como padrão obrigatório
         paymentStatus: 'pendente',
         status: 'pendente',
-        role: 'player'
+        role: isMasterAdmin ? 'admin' : 'player'
       }, { merge: true });
 
       if (auth.currentUser) {

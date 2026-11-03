@@ -9,10 +9,19 @@ export default async function handler(
     return response.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { title, body, url, targetStatus } = request.body;
+  const { title, body, url, targetStatus } = request.body || {};
+
+  if (!title || typeof title !== 'string' || !body || typeof body !== 'string') {
+    return response.status(400).json({ error: 'Título e mensagem são obrigatórios e devem ser texto.' });
+  }
+
+  const safeTitle = title.slice(0, 150);
+  const safeBody = body.slice(0, 300);
+  const safeUrl = typeof url === 'string' && (url.startsWith('/') || url.startsWith('https://')) ? url.slice(0, 200) : '/';
+  const safeTargetStatus = targetStatus === 'pendente' ? 'pendente' : 'all';
 
   if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-    return response.status(500).json({ error: 'FIREBASE_SERVICE_ACCOUNT not configured' });
+    return response.status(500).json({ error: 'Configuração do servidor de notificações indisponível.' });
   }
 
   try {
@@ -32,11 +41,11 @@ export default async function handler(
     
     playersSnap.forEach(pDoc => {
       const pData = pDoc.data();
-      if (targetStatus === 'pendente') {
+      if (safeTargetStatus === 'pendente') {
         const st = pData.status || 'pendente';
         if (st !== 'pendente') return;
       }
-      if (pData.fcmToken) {
+      if (pData.fcmToken && typeof pData.fcmToken === 'string') {
         tokens.push(pData.fcmToken);
       }
     });
@@ -46,9 +55,9 @@ export default async function handler(
     }
 
     const message = {
-      notification: { title, body },
-      data: { url: url || "/" },
-      tokens: tokens,
+      notification: { title: safeTitle, body: safeBody },
+      data: { url: safeUrl },
+      tokens: tokens.slice(0, 500), // Proteção contra estouro de limites do FCM
     };
 
     const result = await messaging.sendEachForMulticast(message);
@@ -59,7 +68,7 @@ export default async function handler(
       failureCount: result.failureCount 
     });
   } catch (error: any) {
-    console.error('Error sending notification:', error);
-    return response.status(500).json({ error: error.message });
+    console.error('Error sending notification:', error?.message || error);
+    return response.status(500).json({ error: 'Falha interna ao processar notificação.' });
   }
 }
