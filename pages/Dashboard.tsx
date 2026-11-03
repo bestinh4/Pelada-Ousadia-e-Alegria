@@ -67,6 +67,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [pixForm, setPixForm] = useState<PixConfig>(DEFAULT_PIX_CONFIG);
   const [isSavingPrices, setIsSavingPrices] = useState(false);
   const [isPixModalOpen, setIsPixModalOpen] = useState(false);
+  const [pixPaymentMode, setPixPaymentMode] = useState<'all' | 'multa_only' | 'pelada_only'>('all');
   const [sharedReceiptFile, setSharedReceiptFile] = useState<File | null>(null);
   const [newPlayerData, setNewPlayerData] = useState({
     name: '',
@@ -1026,6 +1027,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               const fineValNow = hasFineNow ? (currentPlayer.fineAmount || prices.multa || 20) : 0;
               const baseValNow = isGoleiroExempt ? 0 : (isMensal ? prices.mensalista : prices.avulso);
               const totalDueNow = (isPaidNow ? 0 : baseValNow) + fineValNow;
+              const isExplicitlyAbsent = currentPlayer.status === 'ausente';
 
               return (
                 <div
@@ -1051,22 +1053,32 @@ const Dashboard: React.FC<DashboardProps> = ({
                     >
                       {isPaidNow && !hasFineNow ? (
                         <span className="material-symbols-outlined text-[22px]">verified</span>
+                      ) : hasFineNow ? (
+                        <span className="material-symbols-outlined text-[22px] text-white">gavel</span>
                       ) : (
-                        <PixIcon className="w-5 h-5" color={hasFineNow || (isMensal && mensalistaInfo?.isOverdue) ? '#ffffff' : '#32BCAD'} />
+                        <PixIcon className="w-5 h-5" color={isMensal && mensalistaInfo?.isOverdue ? '#ffffff' : '#32BCAD'} />
                       )}
                     </div>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] font-bold uppercase tracking-wider text-outline">
-                          {isMensal ? 'Mensalidade Oficial (Vencimento Dia 10)' : 'Taxa da Pelada (Avulso)'}
+                          {isExplicitlyAbsent && hasFineNow
+                            ? 'Pendência de Multa (Atleta Não Confirmado no Jogo)'
+                            : isMensal
+                              ? 'Mensalidade Oficial (Vencimento Dia 10)'
+                              : 'Taxa da Pelada (Avulso)'}
                         </span>
                         <span className="text-outline">·</span>
-                        {isGoleiroExempt && !hasFineNow ? (
+                        {hasFineNow ? (
+                          <span className="text-[11px] font-bold text-red-800 uppercase flex items-center gap-1">
+                            <span>🚨 Multa Pendente (R$ {fineValNow},00)</span>
+                          </span>
+                        ) : isGoleiroExempt ? (
                           <span className="text-[11px] font-bold text-emerald-700 uppercase">
                             Goleiro Isento 🛡️
                           </span>
-                        ) : isPaidNow && !hasFineNow ? (
+                        ) : isPaidNow ? (
                           <span className="text-[11px] font-bold text-emerald-700 uppercase">
                             {isMensal ? 'Mensalidade Paga ✅' : 'Pagamento Confirmado ✅'}
                           </span>
@@ -1082,7 +1094,11 @@ const Dashboard: React.FC<DashboardProps> = ({
                       </div>
 
                       <h4 className="font-headline-sm text-xs sm:text-sm font-bold text-navy-deep mt-0.5">
-                        {isPaidNow && !hasFineNow ? (
+                        {isExplicitlyAbsent && hasFineNow ? (
+                          `Você não irá para esta pelada, mas possui uma multa de R$ ${fineValNow},00. Pague apenas a multa para regularizar sua situação.`
+                        ) : isPaidNow && hasFineNow ? (
+                          `Sua pelada está confirmada! Falta apenas quitar a multa pendente de R$ ${fineValNow},00.`
+                        ) : isPaidNow ? (
                           isGoleiroExempt ? (
                             'Goleiros titulares possuem isenção na pelada'
                           ) : isMensal ? (
@@ -1090,10 +1106,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                           ) : (
                             `Seu pagamento (R$ ${prices.avulso},00) já está confirmado!`
                           )
-                        ) : hasFineNow && !isPaidNow ? (
-                          `Total a pagar: R$ ${totalDueNow},00 (${isMensal ? 'Mensal' : 'Pelada'} R$ ${baseValNow} + Multa R$ ${fineValNow})`
                         ) : hasFineNow ? (
-                          `Você possui uma multa pendente de R$ ${fineValNow},00`
+                          `Total a pagar: R$ ${totalDueNow},00 (${isMensal ? 'Mensal' : 'Pelada'} R$ ${baseValNow} + Multa R$ ${fineValNow}). Você pode quitar tudo ou pagar apenas a multa!`
                         ) : isMensal ? (
                           mensalistaInfo?.isOverdue
                             ? `Mensalidade vencida em ${mensalistaInfo.deadlineDateFormatted}. Pague R$ ${baseValNow},00 no Pix para regularizar sua vaga.`
@@ -1102,6 +1116,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                           `Valor: R$ ${baseValNow},00 • Pague no Pix e envie o comprovante para baixa automática`
                         )}
                       </h4>
+
+                      {hasFineNow && currentPlayer.fineReason && (
+                        <p className="text-[11px] text-red-800/90 font-medium mt-0.5">
+                          Motivo da multa: {currentPlayer.fineReason}
+                        </p>
+                      )}
 
                       {isMensal && isPaidNow && !hasFineNow && (
                         <p className="text-[11px] text-emerald-800 font-semibold mt-0.5">
@@ -1117,70 +1137,127 @@ const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                   </div>
 
-                  {(() => {
-                    // Para o Mensalista: o botão é "Pagar Mensalidade" e SOME quando o pagamento for confirmado
-                    if (isMensal) {
-                      if (isPaidNow && !hasFineNow) {
-                        return null; // Some completamente quando o pagamento for confirmado!
-                      }
-                      return (
-                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                  {/* AÇÕES DE PAGAMENTO (COM BOTÃO DEDICADO PARA PAGAR APENAS MULTA) */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
+                    {/* Caso 1: Atleta não vai para o jogo, mas tem multa */}
+                    {isExplicitlyAbsent && hasFineNow && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPixPaymentMode('multa_only');
+                          setIsPixModalOpen(true);
+                        }}
+                        className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-red-600 hover:bg-red-700 text-white shadow-red-600/25"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">gavel</span>
+                        <span>Pagar Multa Separadamente (R$ {fineValNow},00)</span>
+                      </button>
+                    )}
+
+                    {/* Caso 2: Atleta já pagou a pelada/mensalidade, mas ainda tem multa */}
+                    {!isExplicitlyAbsent && isPaidNow && hasFineNow && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPixPaymentMode('multa_only');
+                          setIsPixModalOpen(true);
+                        }}
+                        className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-red-600 hover:bg-red-700 text-white shadow-red-600/25"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">gavel</span>
+                        <span>Pagar Multa Pendente (R$ {fineValNow},00)</span>
+                      </button>
+                    )}
+
+                    {/* Caso 3: Mensalista que não pagou a mensalidade */}
+                    {!isExplicitlyAbsent && isMensal && !isPaidNow && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPixPaymentMode(hasFineNow ? 'all' : 'pelada_only');
+                            setIsPixModalOpen(true);
+                          }}
+                          className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25"
+                        >
+                          <PixIcon className="w-4 h-4" color="#ffffff" />
+                          <span>{hasFineNow ? `Pagar Mensal + Multa (R$ ${totalDueNow})` : 'Pagar Mensalidade'}</span>
+                        </button>
+
+                        {hasFineNow && (
                           <button
                             type="button"
-                            onClick={() => setIsPixModalOpen(true)}
-                            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25"
+                            onClick={() => {
+                              setPixPaymentMode('multa_only');
+                              setIsPixModalOpen(true);
+                            }}
+                            className="w-full sm:w-auto min-h-[44px] px-3.5 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all bg-red-600 hover:bg-red-700 text-white shadow-red-600/20"
+                            title="Pagar apenas o valor da multa se não for jogar agora"
                           >
-                            <PixIcon className="w-4 h-4" color="#ffffff" />
-                            <span>{hasFineNow ? 'Pagar Mensalidade + Multa' : 'Pagar Mensalidade'}</span>
+                            <span className="material-symbols-outlined text-[17px]">gavel</span>
+                            <span>Pagar Apenas Multa (R$ {fineValNow},00)</span>
                           </button>
-                        </div>
-                      );
-                    }
+                        )}
+                      </>
+                    )}
 
-                    // Para o Avulso: quando confirmado, exibe status de confirmado e NÃO fica cobrando o atleta
-                    if (!isGoleiroExempt || hasFineNow) {
-                      if (isPaidNow && !hasFineNow) {
-                        return (
-                          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
-                            <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-300">
-                              <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                              <span>Confirmado na Pelada</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setIsPixModalOpen(true)}
-                              className="text-xs text-outline hover:text-navy-deep font-semibold underline px-2 py-1"
-                              title="Visualizar ou reenviar comprovante"
-                            >
-                              Ver Comprovante
-                            </button>
-                          </div>
-                        );
-                      }
+                    {/* Caso 4: Avulso que não pagou o jogo */}
+                    {!isExplicitlyAbsent && !isMensal && (!isGoleiroExempt || hasFineNow) && !isPaidNow && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPixPaymentMode(hasFineNow ? 'all' : 'pelada_only');
+                            setIsPixModalOpen(true);
+                          }}
+                          className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25"
+                        >
+                          <PixIcon className="w-4 h-4" color="#ffffff" />
+                          <span>
+                            {hasFineNow
+                              ? `Pagar Pelada + Multa (R$ ${totalDueNow})`
+                              : 'Pagar com Pix / Comprovante'}
+                          </span>
+                        </button>
 
-                      return (
-                        <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                        {hasFineNow && (
                           <button
                             type="button"
-                            onClick={() => setIsPixModalOpen(true)}
-                            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all bg-[#32BCAD] hover:bg-[#28a99b] text-white shadow-[#32BCAD]/25"
+                            onClick={() => {
+                              setPixPaymentMode('multa_only');
+                              setIsPixModalOpen(true);
+                            }}
+                            className="w-full sm:w-auto min-h-[44px] px-3.5 py-2.5 rounded-xl font-headline-sm text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all bg-red-600 hover:bg-red-700 text-white shadow-red-600/20"
+                            title="Pagar apenas a multa separadamente se não for comparecer na pelada"
                           >
-                            <PixIcon
-                              className="w-4 h-4"
-                              color="#ffffff"
-                            />
-                            <span>
-                              {hasFineNow
-                                ? 'Pagar Pelada + Multa'
-                                : 'Pagar com Pix / Comprovante'}
-                            </span>
+                            <span className="material-symbols-outlined text-[17px]">gavel</span>
+                            <span>Pagar Apenas Multa (R$ {fineValNow},00)</span>
                           </button>
-                        </div>
-                      );
-                    }
+                        )}
+                      </>
+                    )}
 
-                    return null;
-                  })()}
+                    {/* Caso 5: Avulso já pago e sem multas */}
+                    {!isExplicitlyAbsent && !isMensal && isPaidNow && !hasFineNow && (
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <span className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-300">
+                          <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                          <span>Confirmado na Pelada</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPixPaymentMode('pelada_only');
+                            setIsPixModalOpen(true);
+                          }}
+                          className="text-xs text-outline hover:text-navy-deep font-semibold underline px-2 py-1"
+                          title="Visualizar ou reenviar comprovante"
+                        >
+                          Ver Comprovante
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })()
@@ -1207,6 +1284,7 @@ const Dashboard: React.FC<DashboardProps> = ({
           pixConfig={pixConfig}
           initialSharedFile={sharedReceiptFile}
           onClearSharedFile={() => setSharedReceiptFile(null)}
+          initialPaymentMode={pixPaymentMode}
         />
       )}
 

@@ -638,6 +638,14 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
                     {isUserAdmin && (
                       <>
                         <button
+                          onClick={() => setSelectedPlayerForPix(player)}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#32BCAD] hover:bg-[#28a99b] text-white text-[11px] font-bold uppercase transition-all active:scale-95 flex items-center gap-1 shadow-xs"
+                          title="Gerar cobrança Pix exclusiva da multa para o atleta"
+                        >
+                          <PixIcon className="w-3.5 h-3.5" color="#ffffff" />
+                          <span>Pix Multa</span>
+                        </button>
+                        <button
                           onClick={() => handleClearPlayerFine(player, false)}
                           disabled={loadingId === player.id}
                           className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold uppercase transition-all active:scale-95"
@@ -948,6 +956,7 @@ const Finance: React.FC<{ players: Player[], currentUser: any, match: Match | nu
           match={match}
           prices={prices}
           pixConfig={pixConfig}
+          initialPaymentMode={finView === 'multas' ? 'multa_only' : 'all'}
         />
       )}
     </div>

@@ -1,9 +1,11 @@
-import { logout, db, doc, updateDoc, setDoc, auth, updateProfile } from '../services/firebase.ts';
+import { logout, db, doc, updateDoc, setDoc, auth, updateProfile, onSnapshot } from '../services/firebase.ts';
 import React, { useRef, useState, useEffect } from 'react';
-import { Player, Page } from '../types.ts';
+import { Player, Page, PixConfig } from '../types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
 import { requestNotificationPermission, getNotificationStatus, sendPushNotification } from '../services/notificationService.ts';
 import { PWAInstallButton } from '../components/PWAInstallButton.tsx';
+import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
+import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
 
 const Profile: React.FC<{ 
   player: Player; 
@@ -34,6 +36,30 @@ const Profile: React.FC<{
   const [editedPosition, setEditedPosition] = useState(player.position);
   const [editedPlayerType, setEditedPlayerType] = useState(player.playerType || 'avulso');
   const [notifStatus, setNotifStatus] = useState(getNotificationStatus());
+  const [isPixFineOpen, setIsPixFineOpen] = useState(false);
+  const [pixConfig, setPixConfig] = useState<PixConfig>(DEFAULT_PIX_CONFIG);
+  const [prices, setPrices] = useState({ mensalista: 60, avulso: 40, multa: 20 });
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "settings", "finance"), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data() as any;
+        setPrices({
+          mensalista: Number(data.mensalista) || 60,
+          avulso: Number(data.avulso) || 40,
+          multa: Number(data.multa) || 20
+        });
+        setPixConfig({
+          pixKey: data.pixKey || DEFAULT_PIX_CONFIG.pixKey,
+          pixKeyType: data.pixKeyType || DEFAULT_PIX_CONFIG.pixKeyType,
+          receiverName: data.receiverName || DEFAULT_PIX_CONFIG.receiverName,
+          receiverCity: data.receiverCity || DEFAULT_PIX_CONFIG.receiverCity,
+          bankLabel: data.bankLabel || DEFAULT_PIX_CONFIG.bankLabel
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
   
   // Sincronizar campos quando o perfil for carregado do Firestore
   useEffect(() => {
@@ -47,6 +73,8 @@ const Profile: React.FC<{
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isMaster = currentUserEmail === MASTER_ADMIN_EMAIL || currentUser?.email === MASTER_ADMIN_EMAIL;
   const isAdm = player.role === 'admin' || isMaster;
+  const hasFine = Boolean(player.hasNoShowFine || player.hasLateRemovalFine || (player.fineAmount && player.fineAmount > 0));
+  const fineVal = player.fineAmount || prices.multa || 20;
 
   const isDirty = editedName !== player.name || editedPosition !== player.position || (isAdm && editedPlayerType !== player.playerType);
 
@@ -192,6 +220,35 @@ const Profile: React.FC<{
                   <span className="font-scoreboard-num text-3xl text-primary-container leading-none">{player.assists || 0}</span>
                </div>
             </div>
+
+            {/* PENDÊNCIA DE MULTA DO ATLETA & BOTÃO DE PAGAMENTO SEPARADO */}
+            {hasFine && (
+              <div className="w-full mt-3 p-3.5 rounded-2xl bg-red-50 border-2 border-red-400/80 text-left flex flex-col gap-2 shadow-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-red-800 bg-red-200/80 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[13px]">gavel</span>
+                    <span>Multa Pendente</span>
+                  </span>
+                  <span className="font-scoreboard-num text-base font-bold text-red-700">
+                    R$ {fineVal},00
+                  </span>
+                </div>
+                <p className="text-[11px] text-red-900 leading-snug">
+                  {player.fineReason || 'Multa regulamentar por ausência na lista ou desistência fora do prazo.'}
+                </p>
+                <p className="text-[10px] text-red-700/90 leading-tight">
+                  Você pode pagar sua multa separadamente via Pix agora mesmo, sem precisar confirmar presença na próxima pelada.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsPixFineOpen(true)}
+                  className="w-full mt-1 min-h-[42px] py-2 px-3 rounded-xl font-headline-sm text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-red-600/25"
+                >
+                  <PixIcon className="w-4 h-4" color="#ffffff" />
+                  <span>Pagar Multa no Pix (R$ {fineVal},00)</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -584,6 +641,17 @@ const Profile: React.FC<{
           )}
         </div>
       </div>
+
+      {/* MODAL PIX PARA PAGAMENTO EXCLUSIVO DA MULTA */}
+      <PixPaymentModal
+        isOpen={isPixFineOpen}
+        onClose={() => setIsPixFineOpen(false)}
+        player={player}
+        match={null}
+        prices={prices}
+        pixConfig={pixConfig}
+        initialPaymentMode="multa_only"
+      />
     </div>
   );
 };

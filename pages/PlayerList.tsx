@@ -640,7 +640,7 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
                       </span>
                     )}
 
-                    {isCurrentUserAdmin && (player.hasNoShowFine || player.hasLateRemovalFine) && (
+                    {(player.hasNoShowFine || player.hasLateRemovalFine) && (
                       <span className="text-[10px] font-bold text-red-800 bg-red-100 px-2 py-0.5 rounded">
                         🚨 Multado {player.fineAmount ? `(R$ ${player.fineAmount})` : ''}
                       </span>

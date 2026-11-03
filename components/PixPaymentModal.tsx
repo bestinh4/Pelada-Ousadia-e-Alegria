@@ -19,6 +19,7 @@ interface PixPaymentModalProps {
   pixConfig: PixConfig;
   initialSharedFile?: File | null;
   onClearSharedFile?: () => void;
+  initialPaymentMode?: 'all' | 'multa_only' | 'pelada_only';
 }
 
 export const PixIcon: React.FC<{ className?: string; color?: string }> = ({
@@ -124,7 +125,8 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
   prices,
   pixConfig,
   initialSharedFile,
-  onClearSharedFile
+  onClearSharedFile,
+  initialPaymentMode
 }) => {
   const isMensalista = player.playerType === 'mensalista';
   const basePrice = isMensalista ? (prices.mensalista || 60) : (prices.avulso || 40);
@@ -134,7 +136,18 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
   const hasFine = Boolean(player.hasNoShowFine || player.hasLateRemovalFine);
   const fineValue = hasFine ? (player.fineAmount || prices.multa || 20) : 0;
 
-  const [includeFine, setIncludeFine] = useState<boolean>(hasFine);
+  // Modo de pagamento selecionado:
+  // 'multa_only' -> Paga exclusivamente a multa (não altera presença ou pagamento da pelada)
+  // 'all'        -> Paga a taxa da pelada/mensalidade + a multa pendente
+  // 'pelada_only'-> Paga apenas a taxa da pelada/mensalidade
+  const determineInitialMode = (): 'all' | 'multa_only' | 'pelada_only' => {
+    if (initialPaymentMode) return initialPaymentMode;
+    if (hasFine && isBasePaid) return 'multa_only';
+    if (hasFine && !isBasePaid) return 'all';
+    return 'pelada_only';
+  };
+
+  const [paymentMode, setPaymentMode] = useState<'all' | 'multa_only' | 'pelada_only'>(determineInitialMode());
   const [copiedPix, setCopiedPix] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
@@ -149,17 +162,27 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Sincronizar modo inicial quando abrir o modal ou mudar o atleta
   useEffect(() => {
-    setIncludeFine(hasFine);
-  }, [hasFine, player.id]);
-
-  // Calcular o valor total que o atleta está pagando agora
-  const expectedAmount = (() => {
-    if (!isBasePaid && hasFine && includeFine) {
-      return basePrice + fineValue;
+    if (isOpen) {
+      setPaymentMode(determineInitialMode());
+      setVerificationResult({ status: 'idle' });
+      setSelectedFileName(null);
+      setPreviewImg(null);
     }
-    if (!isBasePaid) {
+  }, [isOpen, initialPaymentMode, hasFine, isBasePaid, player.id]);
+
+  // Calcular o valor total baseado no modo de pagamento selecionado
+  const expectedAmount = (() => {
+    if (paymentMode === 'multa_only') {
+      return fineValue;
+    }
+    if (paymentMode === 'pelada_only') {
       return basePrice;
+    }
+    // modo 'all'
+    if (!isBasePaid && hasFine) {
+      return basePrice + fineValue;
     }
     if (hasFine) {
       return fineValue;
@@ -168,17 +191,31 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
   })();
 
   const paymentLabel = (() => {
-    if (!isBasePaid && hasFine && includeFine) {
-      return `${isMensalista ? 'Mensalidade (Venc. Dia 10)' : 'Pelada Avulso'} (R$ ${basePrice}) + Multa (R$ ${fineValue})`;
+    if (paymentMode === 'multa_only') {
+      return `Quitação de Multa Pendente (R$ ${fineValue},00)`;
     }
-    if (!isBasePaid) {
-      return isMensalista ? `Mensalidade Oficial (Vencimento até dia 10)` : 'Taxa da Pelada (Avulso)';
+    if (paymentMode === 'pelada_only') {
+      return isMensalista ? `Mensalidade Oficial (R$ ${basePrice},00)` : `Taxa da Pelada Avulso (R$ ${basePrice},00)`;
+    }
+    // modo 'all'
+    if (!isBasePaid && hasFine) {
+      return `${isMensalista ? 'Mensalidade' : 'Taxa da Pelada'} (R$ ${basePrice}) + Multa (R$ ${fineValue})`;
     }
     if (hasFine) {
-      return 'Quitação de Multa Pendente';
+      return `Quitação de Multa Pendente (R$ ${fineValue},00)`;
     }
-    return isMensalista ? `Mensalidade de ${getMonthName()} (Quitada ✓ • Próx: Dia 10)` : 'Taxa da Pelada (Avulso)';
+    return isMensalista ? `Mensalidade de ${getMonthName()} (R$ ${basePrice},00)` : `Taxa da Pelada Avulso (R$ ${basePrice},00)`;
   })();
+
+  const isPayingMultaOnly = paymentMode === 'multa_only';
+
+  const pixDescription = isPayingMultaOnly
+    ? `Multa OA ${player.name.slice(0, 12)}`
+    : `Pelada OA ${player.name.slice(0, 12)}`;
+
+  const pixTxId = isPayingMultaOnly
+    ? `OAM${player.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8)}`
+    : `OA${player.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)}`;
 
   const pixCopiaECola = generatePixPayload({
     pixKey: pixConfig.pixKey,
@@ -186,8 +223,8 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
     receiverName: pixConfig.receiverName,
     receiverCity: pixConfig.receiverCity,
     amount: expectedAmount,
-    txid: `OA${player.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)}`,
-    description: `Pelada OA ${player.name.slice(0, 12)}`
+    txid: pixTxId,
+    description: pixDescription
   });
 
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&data=${encodeURIComponent(pixCopiaECola)}`;
@@ -286,30 +323,42 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
           if (samePlayerReceipt) {
             const rData = samePlayerReceipt.data();
             const playerUpdates: Record<string, any> = {
-              paymentStatus: 'pago',
-              paidMatchId: match?.id || rData.matchId || '',
-              paidMatchDate: match?.date || rData.matchDate || '',
               lastReceiptId: samePlayerReceipt.id,
               lastReceiptSummary: rData.summary || `Pix confirmado anteriormente`,
               lastPaymentAt: rData.createdAt || new Date().toISOString()
             };
-            if (isMensalista) {
-              playerUpdates.monthlyPaid = true;
-              playerUpdates.monthlyPaidMonth = currentMonthKey;
-            }
-            if (hasFine) {
+
+            if (isPayingMultaOnly) {
               playerUpdates.hasNoShowFine = false;
               playerUpdates.hasLateRemovalFine = false;
               playerUpdates.fineAmount = 0;
               playerUpdates.fineReason = null;
+              playerUpdates.lastFinePaidAt = rData.createdAt || new Date().toISOString();
+            } else {
+              playerUpdates.paymentStatus = 'pago';
+              playerUpdates.paidMatchId = match?.id || rData.matchId || '';
+              playerUpdates.paidMatchDate = match?.date || rData.matchDate || '';
+              if (isMensalista) {
+                playerUpdates.monthlyPaid = true;
+                playerUpdates.monthlyPaidMonth = currentMonthKey;
+              }
+              if (hasFine && paymentMode === 'all') {
+                playerUpdates.hasNoShowFine = false;
+                playerUpdates.hasLateRemovalFine = false;
+                playerUpdates.fineAmount = 0;
+                playerUpdates.fineReason = null;
+                playerUpdates.lastFinePaidAt = rData.createdAt || new Date().toISOString();
+              }
             }
 
             await setDoc(doc(db, 'players', player.id), playerUpdates, { merge: true });
             playSound('cheer');
             setVerificationResult({
               status: 'success',
-              title: 'Comprovante Reconhecido! ✅',
-              message: 'Seu comprovante já havia sido recebido e seu status foi revalidado como PAGO na pelada!',
+              title: isPayingMultaOnly ? 'Multa Reconhecida! ✅' : 'Comprovante Reconhecido! ✅',
+              message: isPayingMultaOnly
+                ? 'Seu comprovante de multa já havia sido recebido e sua multa foi regularizada!'
+                : 'Seu comprovante já havia sido recebido e seu status foi revalidado como PAGO na pelada!',
               details: `ID: ${cleanTxId}`
             });
             setIsVerifying(false);
@@ -331,12 +380,19 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         setVerificationResult({
           status: 'error',
           title: 'Agendamento Não Aceito',
-          message: 'Este comprovante indica um AGENDAMENTO futuro e o pagamento ainda não foi efetivado. Efetive o Pix agora para confirmar sua vaga na pelada.',
+          message: 'Este comprovante indica um AGENDAMENTO futuro e o pagamento ainda não foi efetivado. Efetive o Pix agora para validar.',
           details: data.rejectionReason
         });
         setIsVerifying(false);
         return;
       }
+
+      // Determinar o tipo de pagamento exato
+      const targetPaymentType = isPayingMultaOnly
+        ? 'multa'
+        : paymentMode === 'all'
+          ? (isMensalista ? 'mensalista_com_multa' : 'avulso_com_multa')
+          : (isMensalista ? 'mensalista' : 'avulso');
 
       // Caso o comprovante NÃO tenha sido aprovado automaticamente:
       if (!data.isApproved) {
@@ -348,7 +404,7 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
             playerName: player.name,
             playerPhoto: player.photoUrl || '',
             playerType: player.playerType,
-            paymentType: isMensalista ? 'mensalista' : 'avulso',
+            paymentType: targetPaymentType,
             expectedAmount,
             extractedAmount: 0,
             payerName: data.payerName || player.name,
@@ -357,7 +413,9 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
             transactionId: cleanTxId || ('TX_' + Date.now().toString(36).toUpperCase()),
             receiptDate: data.receiptDate || new Date().toLocaleDateString('pt-BR'),
             receiptTime: data.receiptTime || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            summary: 'Aguardando conferência manual da Diretoria',
+            summary: isPayingMultaOnly
+              ? 'Comprovante de MULTA aguardando conferência manual da Diretoria'
+              : 'Aguardando conferência manual da Diretoria',
             receiptPreviewUrl: previewDataUrl || '',
             verifiedByAi: false,
             status: 'pendente_conferencia',
@@ -367,13 +425,17 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
           });
 
           await setDoc(doc(db, 'players', player.id), {
-            lastReceiptSummary: 'Comprovante enviado • Em conferência pela Diretoria'
+            lastReceiptSummary: isPayingMultaOnly
+              ? 'Comprovante de multa enviado • Em conferência pela Diretoria'
+              : 'Comprovante enviado • Em conferência pela Diretoria'
           }, { merge: true });
 
           setVerificationResult({
             status: 'success',
-            title: 'Comprovante Enviado para a Diretoria! 📋',
-            message: 'A leitura automática foi inconclusiva. Seu comprovante foi salvo com sucesso e a Diretoria fará a baixa manual no Financeiro.',
+            title: isPayingMultaOnly ? 'Comprovante de Multa Enviado! 📋' : 'Comprovante Enviado para a Diretoria! 📋',
+            message: isPayingMultaOnly
+              ? 'A leitura automática foi inconclusiva. O comprovante de quitação da multa foi enviado para a Diretoria regularizar.'
+              : 'A leitura automática foi inconclusiva. Seu comprovante foi salvo com sucesso e a Diretoria fará a baixa manual no Financeiro.',
             details: 'Você pode acompanhar pelo painel da pelada assim que a Diretoria conferir.'
           });
           setIsVerifying(false);
@@ -393,17 +455,6 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
 
       // APROVADO COM SEGURANÇA! Atualizar o status do atleta no Firestore e registrar na coleção "receipts"
       const nowIso = new Date().toISOString();
-      const paymentType =
-        !isBasePaid && hasFine && includeFine
-          ? isMensalista
-            ? 'mensalista_com_multa'
-            : 'avulso_com_multa'
-          : !isBasePaid
-            ? isMensalista
-              ? 'mensalista'
-              : 'avulso'
-            : 'multa';
-
       const finalAmount = Number(data.extractedAmount) || expectedAmount;
 
       const receiptDocRef = await addDoc(collection(db, 'receipts'), {
@@ -411,7 +462,7 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         playerName: player.name,
         playerPhoto: player.photoUrl || '',
         playerType: player.playerType,
-        paymentType,
+        paymentType: targetPaymentType,
         expectedAmount,
         extractedAmount: finalAmount,
         payerName: data.payerName || player.name,
@@ -420,7 +471,7 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         transactionId: cleanTxId || ('TX_' + Date.now().toString(36).toUpperCase()),
         receiptDate: data.receiptDate || new Date().toLocaleDateString('pt-BR'),
         receiptTime: data.receiptTime || new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        summary: data.summary || `Pix R$ ${finalAmount.toFixed(2)} confirmado`,
+        summary: data.summary || `${isPayingMultaOnly ? 'Multa' : 'Pix'} R$ ${finalAmount.toFixed(2)} confirmado`,
         receiptPreviewUrl: previewDataUrl || '',
         verifiedByAi: Boolean(data.verifiedByAi ?? true),
         status: 'aprovado',
@@ -433,24 +484,34 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
         lastPaymentAt: nowIso,
         lastPaymentAmount: finalAmount,
         lastReceiptId: receiptDocRef.id,
-        lastReceiptSummary:
-          data.summary ||
-          `R$ ${finalAmount.toFixed(2)} (${data.bankName || 'Pix'})`,
-        paymentStatus: 'pago',
-        paidMatchId: match?.id || '',
-        paidMatchDate: match?.date || ''
+        lastReceiptSummary: isPayingMultaOnly
+          ? `Multa R$ ${finalAmount.toFixed(2)} quitada (${data.bankName || 'Pix'})`
+          : (data.summary || `R$ ${finalAmount.toFixed(2)} (${data.bankName || 'Pix'})`),
       };
 
-      if (isMensalista) {
-        playerUpdates.monthlyPaid = true;
-        playerUpdates.monthlyPaidMonth = currentMonthKey;
-      }
-
-      if (hasFine) {
+      if (isPayingMultaOnly) {
+        // Se está pagando APENAS a multa, removemos as multas SEM alterar status da pelada!
         playerUpdates.hasNoShowFine = false;
         playerUpdates.hasLateRemovalFine = false;
         playerUpdates.fineAmount = 0;
         playerUpdates.fineReason = null;
+        playerUpdates.lastFinePaidAt = nowIso;
+      } else {
+        // Pagamento da pelada ou pelada + multa
+        playerUpdates.paymentStatus = 'pago';
+        playerUpdates.paidMatchId = match?.id || '';
+        playerUpdates.paidMatchDate = match?.date || '';
+        if (isMensalista) {
+          playerUpdates.monthlyPaid = true;
+          playerUpdates.monthlyPaidMonth = currentMonthKey;
+        }
+        if (hasFine && paymentMode === 'all') {
+          playerUpdates.hasNoShowFine = false;
+          playerUpdates.hasLateRemovalFine = false;
+          playerUpdates.fineAmount = 0;
+          playerUpdates.fineReason = null;
+          playerUpdates.lastFinePaidAt = nowIso;
+        }
       }
 
       await setDoc(doc(db, 'players', player.id), playerUpdates, { merge: true });
@@ -458,8 +519,10 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
 
       setVerificationResult({
         status: 'success',
-        title: 'Pagamento Confirmado na Hora! ✅',
-        message: `Seu pagamento de R$ ${finalAmount.toFixed(2)} foi processado com sucesso e seu status já está atualizado como PAGO na pelada!`,
+        title: isPayingMultaOnly ? 'Multa Paga com Sucesso! ✅' : 'Pagamento Confirmado na Hora! ✅',
+        message: isPayingMultaOnly
+          ? `Sua multa de R$ ${finalAmount.toFixed(2)} foi quitada! Seu cadastro está regularizado junto à Diretoria da pelada.`
+          : `Seu pagamento de R$ ${finalAmount.toFixed(2)} foi processado com sucesso e seu status já está atualizado como PAGO na pelada!`,
         details: `${data.bankName ? `Banco: ${data.bankName} • ` : ''}${data.receiptDate || 'Hoje'} ${data.receiptTime || ''}`
       });
     } catch (err: any) {
@@ -553,20 +616,59 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
               </span>
             </div>
 
-            {/* Opção de incluir/desmarcar multa se o atleta tiver ambos pendentes */}
-            {!isBasePaid && hasFine && (
-              <label className="mt-1 pt-2 border-t border-white/15 flex items-center justify-between gap-2 text-xs cursor-pointer select-none">
-                <span className="text-amber-200 font-semibold">
-                  Incluir multa pendente (+ R$ {fineValue},00) neste Pix?
+            {/* Opção de alternar entre pagar Apenas Multa, Tudo Junto ou Apenas Pelada */}
+            {hasFine && !isBasePaid ? (
+              <div className="mt-1 pt-2 border-t border-white/20 flex flex-col gap-1.5">
+                <span className="text-[11px] font-semibold text-amber-200">
+                  Escolha o que deseja pagar neste Pix:
                 </span>
-                <input
-                  type="checkbox"
-                  checked={includeFine}
-                  onChange={(e) => setIncludeFine(e.target.checked)}
-                  className="w-4 h-4 accent-emerald-400 rounded cursor-pointer"
-                />
-              </label>
-            )}
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode('multa_only')}
+                    className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-0.5 border ${
+                      paymentMode === 'multa_only'
+                        ? 'bg-red-500 text-white border-red-300 shadow-sm'
+                        : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+                    }`}
+                  >
+                    <span>Apenas Multa</span>
+                    <span className="text-[10px] opacity-90 font-mono">R$ {fineValue},00</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode('all')}
+                    className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-0.5 border ${
+                      paymentMode === 'all'
+                        ? 'bg-amber-400 text-navy-deep border-amber-300 shadow-sm font-black'
+                        : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+                    }`}
+                  >
+                    <span>Pelada + Multa</span>
+                    <span className="text-[10px] opacity-90 font-mono">R$ {basePrice + fineValue},00</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMode('pelada_only')}
+                    className={`py-1.5 px-2 rounded-xl text-[11px] font-bold transition-all flex flex-col items-center justify-center gap-0.5 border ${
+                      paymentMode === 'pelada_only'
+                        ? 'bg-emerald-500 text-white border-emerald-300 shadow-sm'
+                        : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+                    }`}
+                  >
+                    <span>Apenas Pelada</span>
+                    <span className="text-[10px] opacity-90 font-mono">R$ {basePrice},00</span>
+                  </button>
+                </div>
+              </div>
+            ) : hasFine && isBasePaid ? (
+              <div className="mt-1 pt-2 border-t border-white/20 text-[11px] text-amber-200 font-medium flex items-center gap-1.5">
+                <span className="material-symbols-outlined text-[16px] text-amber-300">info</span>
+                <span>Sua pelada/mensalidade está paga. Este Pix é exclusivo para quitar a multa pendente.</span>
+              </div>
+            ) : null}
           </div>
 
           {/* PASSO 1: QR CODE E PIX COPIA E COLA */}
@@ -607,7 +709,9 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
                 <span>
                   {copiedPix
                     ? 'CÓDIGO PIX COPIADO! ABRA SEU BANCO'
-                    : `COPIAR PIX COPIA E COLA (R$ ${expectedAmount.toFixed(2).replace('.', ',')})`}
+                    : isPayingMultaOnly
+                      ? `COPIAR PIX DA MULTA (R$ ${expectedAmount.toFixed(2).replace('.', ',')})`
+                      : `COPIAR PIX COPIA E COLA (R$ ${expectedAmount.toFixed(2).replace('.', ',')})`}
                 </span>
               </button>
 
