@@ -10,7 +10,14 @@ import {
   createReceiptSignature,
   FIREBASE_PROJECT_ID,
 } from '../api/_auth.mjs';
-import { sanitizePushPayload, isValidPushSubscription, sendDualChannelPush } from '../api/_push.mjs';
+import webpush from 'web-push';
+import {
+  sanitizePushPayload,
+  isValidPushSubscription,
+  sendDualChannelPush,
+  getServerVapidPublicKey,
+  isWebPushConfigured,
+} from '../api/_push.mjs';
 import verifyReceiptHandler from '../api/verify-receipt.ts';
 import sendNotificationHandler from '../api/send-notification.ts';
 import { VAPID_PUBLIC_KEY } from '../constants/vapid.ts';
@@ -150,7 +157,7 @@ test('Push Validation & Sanitization: rejects unsafe URLs, HTTP endpoints, and o
   assert.equal(result.sentCount, 0);
 });
 
-test('VAPID Public Key & Secret Hygiene: valid 65-byte EC point and no hardcoded private key in server.ts', () => {
+test('VAPID Public Key & Secret Hygiene: valid 65-byte EC point, dynamic env rotation, and no hardcoded private key in server.ts', () => {
   const pad = '='.repeat((4 - (VAPID_PUBLIC_KEY.length % 4)) % 4);
   const raw = Buffer.from((VAPID_PUBLIC_KEY + pad).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
   assert.equal(raw.length, 65);
@@ -158,6 +165,26 @@ test('VAPID Public Key & Secret Hygiene: valid 65-byte EC point and no hardcoded
 
   const serverSource = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf8');
   assert.equal(serverSource.includes('nwQxXctm5wIIykYEsCXfKGbCWh8zjsvF38cJGkUiAps'), false);
+
+  const prevPriv = process.env.VAPID_PRIVATE_KEY;
+  const prevPub = process.env.VAPID_PUBLIC_KEY;
+  try {
+    delete process.env.VAPID_PRIVATE_KEY;
+    delete process.env.VAPID_PUBLIC_KEY;
+    assert.equal(isWebPushConfigured(), false);
+    assert.equal(getServerVapidPublicKey(), VAPID_PUBLIC_KEY);
+
+    const generated = webpush.generateVAPIDKeys();
+    process.env.VAPID_PUBLIC_KEY = generated.publicKey;
+    process.env.VAPID_PRIVATE_KEY = generated.privateKey;
+    assert.equal(getServerVapidPublicKey(), generated.publicKey);
+    assert.equal(isWebPushConfigured(), true);
+  } finally {
+    if (prevPriv === undefined) delete process.env.VAPID_PRIVATE_KEY;
+    else process.env.VAPID_PRIVATE_KEY = prevPriv;
+    if (prevPub === undefined) delete process.env.VAPID_PUBLIC_KEY;
+    else process.env.VAPID_PUBLIC_KEY = prevPub;
+  }
 });
 
 test('Receipt HMAC Signature: deterministic when secret is present', () => {

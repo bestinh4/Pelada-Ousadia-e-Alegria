@@ -1,33 +1,49 @@
 import webpush from 'web-push';
 import admin from 'firebase-admin';
 
-const VAPID_PUBLIC_KEY =
+const DEFAULT_VAPID_PUBLIC_KEY =
   'BIXN8KDG-7IS82_ykSdcgndt1wyVaWnz0Y5TLBAPWSJRhbPXV5sHpN2TxxhwA3ZwdOUbVPjhYxFmenwVciZN2xE';
 const VAPID_SUBJECT = 'mailto:diiogo49@gmail.com';
 
-let configuredVapidKey = null;
+let configuredVapidPair = null;
 
 function cleanEnvValue(raw) {
   return (raw || '').trim().replace(/^["']|["']$/g, '');
 }
 
+export function getServerVapidPublicKey() {
+  return (
+    cleanEnvValue(process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY) ||
+    DEFAULT_VAPID_PUBLIC_KEY
+  );
+}
+
 function ensureWebPushConfigured() {
   const privateKey = cleanEnvValue(process.env.VAPID_PRIVATE_KEY);
+  const publicKey = getServerVapidPublicKey();
   if (!privateKey) {
-    return { ready: false, error: 'VAPID_PRIVATE_KEY não configurada no servidor.' };
+    return {
+      ready: false,
+      error: 'VAPID_PRIVATE_KEY não configurada nas variáveis de ambiente do servidor.',
+    };
   }
-  if (configuredVapidKey === privateKey) {
+  const pairKey = `${publicKey}:${privateKey}`;
+  if (configuredVapidPair === pairKey) {
     return { ready: true };
   }
 
   try {
-    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, privateKey);
-    configuredVapidKey = privateKey;
+    webpush.setVapidDetails(VAPID_SUBJECT, publicKey, privateKey);
+    configuredVapidPair = pairKey;
     return { ready: true };
   } catch (err) {
     console.warn('Aviso ao configurar VAPID:', err?.message || err);
     return { ready: false, error: 'VAPID_PRIVATE_KEY inválida no servidor.' };
   }
+}
+
+export function isWebPushConfigured() {
+  return ensureWebPushConfigured().ready;
 }
 
 function ensureFirebaseAdmin() {

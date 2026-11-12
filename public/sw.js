@@ -299,14 +299,28 @@ self.addEventListener('push', (event) => {
   );
 });
 
+async function getActiveVapidPublicKey() {
+  try {
+    const res = await fetch('/api/health', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.vapidPublicKey === 'string' && data.vapidPublicKey.length > 20) {
+        return data.vapidPublicKey;
+      }
+    }
+  } catch {}
+  return VAPID_PUBLIC_KEY;
+}
+
 // Renovação automática da inscrição Push em segundo plano quando o navegador rotacionar as chaves/endpoint
 self.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
     (async () => {
       try {
+        const activePublicKey = await getActiveVapidPublicKey();
         const newSubscription = await self.registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+          applicationServerKey: urlBase64ToUint8Array(activePublicKey),
         });
 
         const subJson = newSubscription.toJSON();
@@ -339,9 +353,10 @@ self.addEventListener('periodicsync', (event) => {
         try {
           const existing = await self.registration.pushManager.getSubscription();
           if (!existing) {
+            const activePublicKey = await getActiveVapidPublicKey();
             await self.registration.pushManager.subscribe({
               userVisibleOnly: true,
-              applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+              applicationServerKey: urlBase64ToUint8Array(activePublicKey),
             });
           }
           const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });

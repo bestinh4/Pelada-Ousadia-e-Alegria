@@ -21,6 +21,32 @@ const MY_ENDPOINT_STORAGE_KEY = 'oa_my_push_endpoint';
 const FCM_SKIP_UNTIL_KEY = 'oa_fcm_skip_until';
 let lastSyncAttemptMs = 0;
 
+let cachedVapidPublicKey: string | null = null;
+
+async function resolveVapidPublicKey(): Promise<string> {
+  if (cachedVapidPublicKey) return cachedVapidPublicKey;
+  const envPublicKey =
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_VAPID_PUBLIC_KEY) || '';
+  if (typeof envPublicKey === 'string' && envPublicKey.trim().length > 20) {
+    const resolved = envPublicKey.trim();
+    cachedVapidPublicKey = resolved;
+    return resolved;
+  }
+  try {
+    const res = await fetch('/api/health', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.vapidPublicKey === 'string' && data.vapidPublicKey.trim().length > 20) {
+        const resolved = data.vapidPublicKey.trim();
+        cachedVapidPublicKey = resolved;
+        return resolved;
+      }
+    }
+  } catch {}
+  cachedVapidPublicKey = VAPID_KEY;
+  return VAPID_KEY;
+}
+
 function shouldAttemptFcmToken(): boolean {
   if (!messaging) return false;
   try {
@@ -35,8 +61,9 @@ function shouldAttemptFcmToken(): boolean {
 async function safeTryGetFcmToken(registration: ServiceWorkerRegistration): Promise<string | null> {
   if (!shouldAttemptFcmToken() || !messaging) return null;
   try {
+    const activePublicKey = await resolveVapidPublicKey();
     const token = await getToken(messaging, {
-      vapidKey: VAPID_KEY,
+      vapidKey: activePublicKey,
       serviceWorkerRegistration: registration,
     });
     return token || null;
@@ -91,8 +118,9 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 async function ensureActivePushSubscription(
   registration: ServiceWorkerRegistration
 ): Promise<PushSubscription | null> {
+  const activePublicKey = await resolveVapidPublicKey();
   let subscription = await registration.pushManager.getSubscription();
-  if (subscription && !isSameApplicationServerKey(subscription, VAPID_PUBLIC_KEY)) {
+  if (subscription && !isSameApplicationServerKey(subscription, activePublicKey)) {
     try {
       await subscription.unsubscribe();
     } catch {}
@@ -102,7 +130,7 @@ async function ensureActivePushSubscription(
   if (!subscription) {
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      applicationServerKey: urlBase64ToUint8Array(activePublicKey),
     });
   }
   return subscription;

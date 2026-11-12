@@ -7,7 +7,7 @@ import { initializeApp as initClientApp, getApps as getClientApps } from "fireba
 import { getFirestore as getClientFirestore, doc, getDoc } from "firebase/firestore";
 import { analyzeReceiptWithGemini } from "./api/verify-receipt.ts";
 import { requireFirebaseAuth, checkRateLimit, getClientIp, createReceiptSignature } from "./api/_auth.mjs";
-import { sendDualChannelPush } from "./api/_push.mjs";
+import { sendDualChannelPush, getServerVapidPublicKey, isWebPushConfigured } from "./api/_push.mjs";
 
 dotenv.config();
 
@@ -68,8 +68,9 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
-      webPushConfigured: Boolean(process.env.VAPID_PRIVATE_KEY),
+      webPushConfigured: isWebPushConfigured(),
       fcmAdminConfigured: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT),
+      vapidPublicKey: getServerVapidPublicKey(),
     });
   });
 
