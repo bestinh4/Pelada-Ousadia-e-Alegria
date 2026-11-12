@@ -2,7 +2,8 @@ import { logout, db, doc, updateDoc, setDoc, auth, updateProfile, onSnapshot } f
 import React, { useRef, useState, useEffect } from 'react';
 import { Player, Page, PixConfig } from '../types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
-import { requestNotificationPermission, getNotificationStatus, sendPushNotification } from '../services/notificationService.ts';
+import { requestNotificationPermission, getNotificationStatus, sendPushNotification, testBackgroundPush } from '../services/notificationService.ts';
+import { getBackgroundDiagnostics, BackgroundDiagnostics } from '../services/backgroundKeepAlive.ts';
 import { PWAInstallButton } from '../components/PWAInstallButton.tsx';
 import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
@@ -36,6 +37,9 @@ const Profile: React.FC<{
   const [editedPosition, setEditedPosition] = useState(player.position);
   const [editedPlayerType, setEditedPlayerType] = useState(player.playerType || 'avulso');
   const [notifStatus, setNotifStatus] = useState(getNotificationStatus());
+  const [bgDiagnostics, setBgDiagnostics] = useState<BackgroundDiagnostics | null>(null);
+  const [isTestingBgPush, setIsTestingBgPush] = useState(false);
+  const [bgTestFeedback, setBgTestFeedback] = useState<string | null>(null);
   const [isPixFineOpen, setIsPixFineOpen] = useState(false);
   const [pixConfig, setPixConfig] = useState<PixConfig>(DEFAULT_PIX_CONFIG);
   const [prices, setPrices] = useState({ mensalista: 60, avulso: 40, multa: 20 });
@@ -69,6 +73,10 @@ const Profile: React.FC<{
       setEditedPlayerType(player.playerType || 'avulso');
     }
   }, [player?.id, player?.name, player?.position, player?.playerType]);
+
+  useEffect(() => {
+    getBackgroundDiagnostics().then(setBgDiagnostics).catch(() => {});
+  }, [notifStatus]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isMaster = currentUserEmail === MASTER_ADMIN_EMAIL || currentUser?.email === MASTER_ADMIN_EMAIL;
@@ -314,9 +322,12 @@ const Profile: React.FC<{
                       id: targetId,
                       name: editedName.trim(),
                       position: editedPosition,
-                      playerType: editedPlayerType,
                       updatedAt: new Date().toISOString()
                     };
+
+                    if (isAdm) {
+                      updates.playerType = editedPlayerType;
+                    }
 
                     if (player.email || currentUser?.email) {
                       updates.email = player.email || currentUser?.email;
@@ -398,8 +409,9 @@ const Profile: React.FC<{
               {notifStatus !== 'granted' ? (
                 <button 
                   onClick={async () => {
-                    const res = await requestNotificationPermission(player.id);
+                    const res = await requestNotificationPermission(currentUser?.uid || player.id, player.id);
                     setNotifStatus(res ? 'granted' : 'denied');
+                    getBackgroundDiagnostics().then(setBgDiagnostics).catch(() => {});
                   }}
                   className="px-3 py-1.5 bg-navy-deep text-on-secondary rounded-lg font-label-md text-label-md active:scale-95"
                 >
@@ -413,19 +425,72 @@ const Profile: React.FC<{
               )}
             </div>
 
+            {/* Diagnóstico de Segundo Plano */}
+            {bgDiagnostics && (
+              <div className="p-2.5 rounded-xl bg-surface-container-low border border-surface-container-high/50 flex flex-col gap-1.5 text-[11px]">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-bold text-navy-deep">Status em Segundo Plano:</span>
+                  <span className={`font-bold ${bgDiagnostics.hasPushSubscription ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {bgDiagnostics.hasPushSubscription ? '✅ Push em Background Conectado' : '⚠️ Reativar Inscrição Push'}
+                  </span>
+                </div>
+                <div className="text-outline leading-snug">
+                  • Modo App Instalado: <strong>{bgDiagnostics.isStandalonePWA ? 'Sim (PWA)' : 'Navegador'}</strong>
+                  {' · '}
+                  Service Worker: <strong>{bgDiagnostics.hasServiceWorker ? 'Ativo' : 'Pendente'}</strong>
+                </div>
+                <p className="text-[10px] text-outline leading-tight">
+                  {bgDiagnostics.isIOS
+                    ? 'No iPhone/iPad, para receber notificações com o app fechado, adicione o site à Tela de Início (Compartilhar → Adicionar à Tela de Início).'
+                    : 'No Android/PC, instale o app e mantenha Bateria em "Sem restrições" para nunca atrasar alertas com a tela apagada.'}
+                </p>
+              </div>
+            )}
+
             {/* Test button for mobile validation */}
-            <button
-              onClick={() => {
-                sendPushNotification(
-                  "⚽ TESTE DE NOTIFICAÇÃO!",
-                  "Notificação oficial funcionando perfeitamente no seu dispositivo!"
-                );
-              }}
-              className="w-full py-2 px-3 bg-surface-container hover:bg-surface-container-high rounded-xl text-xs font-bold text-navy-deep flex items-center justify-center gap-1.5 active:scale-95 transition-all"
-            >
-              <span className="material-symbols-outlined text-[16px]">vibration</span>
-              <span>Testar Notificação Agora (com Vibração)</span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  sendPushNotification(
+                    "⚽ TESTE DE NOTIFICAÇÃO!",
+                    "Notificação oficial funcionando perfeitamente no seu dispositivo!"
+                  );
+                }}
+                className="w-full py-2 px-3 bg-surface-container hover:bg-surface-container-high rounded-xl text-xs font-bold text-navy-deep flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+              >
+                <span className="material-symbols-outlined text-[16px]">vibration</span>
+                <span>Testar Agora</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isTestingBgPush}
+                onClick={async () => {
+                  setIsTestingBgPush(true);
+                  setBgTestFeedback('⏳ Agendado para daqui a 5s! Minimize ou feche o app agora para testar...');
+                  const uid = currentUser?.uid || player.id;
+                  const result = await testBackgroundPush(uid, player.id, 5);
+                  setIsTestingBgPush(false);
+                  if (result.ok) {
+                    setBgTestFeedback('✅ Push enviado em segundo plano! Confira a barra de notificações.');
+                    setNotifStatus(getNotificationStatus());
+                    getBackgroundDiagnostics().then(setBgDiagnostics).catch(() => {});
+                  } else {
+                    setBgTestFeedback(`⚠️ ${result.error || 'Não foi possível concluir o teste em background.'}`);
+                  }
+                }}
+                className="w-full py-2 px-3 bg-navy-deep hover:opacity-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-60"
+              >
+                <span className="material-symbols-outlined text-[16px]">notifications_active</span>
+                <span>{isTestingBgPush ? 'Enviando em 5s...' : 'Testar App Fechado (5s)'}</span>
+              </button>
+            </div>
+
+            {bgTestFeedback && (
+              <p className="text-[11px] font-semibold text-navy-deep bg-blue-50 border border-blue-200 rounded-xl px-3 py-2 leading-snug">
+                {bgTestFeedback}
+              </p>
+            )}
           </div>
 
           {/* DIRETORIA / ADMIN: CONTROLE DO TEMA NATALINO DE DEZEMBRO */}

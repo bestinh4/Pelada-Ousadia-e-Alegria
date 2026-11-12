@@ -1,22 +1,19 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import admin from "firebase-admin";
-import webpush from "web-push";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import { initializeApp as initClientApp, getApps as getClientApps } from "firebase/app";
 import { getFirestore as getClientFirestore, doc, getDoc } from "firebase/firestore";
 import { analyzeReceiptWithGemini } from "./api/verify-receipt.ts";
-import { VAPID_PUBLIC_KEY, VAPID_SUBJECT } from "./constants/vapid.ts";
+import { requireFirebaseAuth, checkRateLimit, getClientIp, createReceiptSignature } from "./api/_auth.ts";
+import { sendDualChannelPush } from "./api/_push.ts";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Segredo do Servidor: A chave privada VAPID NUNCA é enviada ao cliente ou bundle web
-const SERVER_VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "nwQxXctm5wIIykYEsCXfKGbCWh8zjsvF38cJGkUiAps";
 
 const clientFirebaseConfig = {
   apiKey: "AIzaSyBa8kF4pSrx_-GuHVT_hGMgh_UmRc0NBx0",
@@ -30,32 +27,27 @@ const clientFirebaseConfig = {
 const clientApp = getClientApps().length === 0 ? initClientApp(clientFirebaseConfig, "server-client") : getClientApps()[0];
 const clientDb = getClientFirestore(clientApp);
 
-// Configuração do Web Push padrão W3C para notificações com app fechado
-try {
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, SERVER_VAPID_PRIVATE_KEY);
-  console.log("✅ WebPush VAPID inicializado com sucesso para entrega em background.");
-} catch (vErr) {
-  console.warn("⚠️ Aviso ao configurar VAPID:", vErr);
+if (!process.env.VAPID_PRIVATE_KEY) {
+  console.warn("⚠️ VAPID_PRIVATE_KEY não configurada nas variáveis de ambiente. Configure no .env ou na Vercel para habilitar envio Web Push em background.");
+} else {
+  console.log("✅ WebPush VAPID pronto para entrega em background.");
 }
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
-  // Inicializar Firebase Admin
-  // Tenta usar as credenciais do ambiente ou inicializa com o projeto padrão
   try {
     if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        projectId: "ousadia-5b1d8"
-      });
+      if (!admin.apps.length) {
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          projectId: "ousadia-5b1d8"
+        });
+      }
     } else {
-      console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT não encontrada. WebPush VAPID ativo para segundo plano.");
-      admin.initializeApp({
-        projectId: "ousadia-5b1d8"
-      });
+      console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT não encontrada. Autenticação de API via certificados públicos Firebase ativa.");
     }
   } catch (err) {
     console.error("❌ Erro ao inicializar Firebase Admin:", err);
@@ -73,37 +65,17 @@ async function startServer() {
 
   app.use(express.json({ limit: "15mb" }));
 
-  // Rate Limiting em memória para proteção contra abuso e DoS
-  const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-  const checkRateLimit = (ip: string, maxRequests: number, windowMs: number): boolean => {
-    const now = Date.now();
-    const entry = rateLimitMap.get(ip);
-    if (!entry || now > entry.resetAt) {
-      rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
-      return true;
-    }
-    if (entry.count >= maxRequests) {
-      return false;
-    }
-    entry.count++;
-    return true;
-  };
-
-  // Limpeza periódica do mapa de rate limit
-  setInterval(() => {
-    const now = Date.now();
-    for (const [key, value] of rateLimitMap.entries()) {
-      if (now > value.resetAt) rateLimitMap.delete(key);
-    }
-  }, 60000);
-
   // API Health Check
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok" });
+    res.json({
+      status: "ok",
+      webPushConfigured: Boolean(process.env.VAPID_PRIVATE_KEY),
+      fcmAdminConfigured: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT),
+    });
   });
 
   // Imagem do Time da Semana para WhatsApp Link Preview & Redes Sociais
-  app.get("/api/cover-team/image", async (req, res) => {
+  app.get("/api/cover-team/image", async (_req, res) => {
     try {
       const snap = await getDoc(doc(clientDb, "settings", "coverTeam"));
       if (snap.exists()) {
@@ -118,84 +90,43 @@ async function startServer() {
             res.set("Content-Type", mimeType);
             res.set("Cache-Control", "public, max-age=60");
             return res.send(buffer);
-          } else if (photoUrl.startsWith("http")) {
+          } else if (photoUrl.startsWith("https://")) {
             return res.redirect(photoUrl);
           }
         }
       }
       return res.sendFile(path.join(__dirname, "public", "images", "ousadia_alegria_crest.png"));
-    } catch (e) {
+    } catch {
       return res.sendFile(path.join(__dirname, "public", "images", "ousadia_alegria_crest.png"));
     }
   });
 
-  // Disparo de Notificações Web Push com Validação e Proteção contra Spam
+  // Disparo Autenticado de Notificações (Web Push W3C + FCM Dual-Channel)
   app.post("/api/send-notification", async (req, res) => {
-    const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-    if (!checkRateLimit(`notif_${clientIp}`, 20, 60000)) {
+    const user = await requireFirebaseAuth(req, res);
+    if (!user) return;
+
+    const clientIp = getClientIp(req);
+    if (!checkRateLimit(`notif_${user.uid}_${clientIp}`, 30, 60000)) {
       return res.status(429).json({ ok: false, error: "Limite de envio de notificações excedido. Tente novamente mais tarde." });
     }
 
     try {
-      const { title, body, url, soundPattern, subscriptions } = req.body || {};
-      
-      const safeTitle = typeof title === "string" ? title.slice(0, 150) : "Ousadia & Alegria";
-      const safeBody = typeof body === "string" ? body.slice(0, 300) : "Atualizações na pelada!";
-      const safeUrl = typeof url === "string" && (url.startsWith("/") || url.startsWith("https://")) ? url.slice(0, 200) : "/";
-      const safeSound = soundPattern === "double" || soundPattern === "triple" || soundPattern === "start" ? soundPattern : "single";
-
-      const payload = JSON.stringify({
-        title: safeTitle,
-        body: safeBody,
-        url: safeUrl,
-        soundPattern: safeSound,
-        tag: "oa-notif-" + Date.now()
-      });
-
-      let sentCount = 0;
-      let failedCount = 0;
-
-      if (Array.isArray(subscriptions) && subscriptions.length > 0) {
-        // Limita tamanho do lote para proteção contra sobrecarga
-        const cappedSubs = subscriptions.slice(0, 200);
-        console.log(`📡 Transmitindo Web Push para ${cappedSubs.length} dispositivo(s) em background...`);
-        
-        const promises = cappedSubs.map(async (sub) => {
-          if (!sub || typeof sub !== "object" || !sub.endpoint || typeof sub.endpoint !== "string") return;
-          try {
-            await webpush.sendNotification(sub, payload, {
-              TTL: 60 * 60 * 24, // 24 horas de retenção na fila do sistema operacional
-              urgency: 'high'
-            });
-            sentCount++;
-          } catch (pushErr: any) {
-            failedCount++;
-            if (pushErr.statusCode === 410 || pushErr.statusCode === 404) {
-              console.log(`ℹ️ Inscrição expirada no aparelho (${pushErr.statusCode}).`);
-            }
-          }
-        });
-
-        await Promise.allSettled(promises);
-        console.log(`✅ Web Push finalizado: ${sentCount} entregues com sucesso, ${failedCount} falhas/expiradas.`);
-      }
-
-      return res.status(200).json({
-        ok: true,
-        sentCount,
-        failedCount,
-        title: safeTitle
-      });
+      const result = await sendDualChannelPush(req.body || {});
+      return res.status(200).json(result);
     } catch (err: any) {
       console.error("❌ Erro no endpoint /api/send-notification:", err);
       return res.status(500).json({ ok: false, error: "Erro interno no processamento da notificação" });
     }
   });
 
-  // Validação Segura de Comprovante Pix via Gemini Vision (Server-Side)
+  // Validação Autenticada de Comprovante Pix via Gemini Vision (Server-Side)
   app.post("/api/verify-receipt", async (req, res) => {
-    const clientIp = req.ip || req.socket.remoteAddress || "unknown";
-    if (!checkRateLimit(`receipt_${clientIp}`, 15, 60000)) {
+    const user = await requireFirebaseAuth(req, res);
+    if (!user) return;
+
+    const clientIp = getClientIp(req);
+    if (!checkRateLimit(`receipt_${user.uid}_${clientIp}`, 15, 60000)) {
       return res.status(429).json({ error: "Limite de tentativas excedido. Aguarde um minuto." });
     }
 
@@ -224,7 +155,19 @@ async function startServer() {
         playerName: typeof playerName === "string" ? playerName.slice(0, 100) : undefined,
       });
 
-      return res.status(200).json(result);
+      const verificationSignature = createReceiptSignature({
+        transactionId: result.transactionId || '',
+        extractedAmount: result.extractedAmount || 0,
+        expectedAmount: expectedVal,
+        isApproved: Boolean(result.isApproved),
+        uid: user.uid,
+      });
+
+      return res.status(200).json({
+        ...result,
+        verifiedByUid: user.uid,
+        ...(verificationSignature ? { verificationSignature } : {}),
+      });
     } catch (error: any) {
       console.error("❌ Erro ao validar comprovante Pix com IA:", error);
       // NUNCA aprovar automaticamente em caso de falha de IA!
@@ -258,7 +201,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*", (req, res) => {
+    app.get("*", (_req, res) => {
       res.sendFile(path.join(__dirname, "dist", "index.html"));
     });
   }

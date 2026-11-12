@@ -11,14 +11,14 @@ service cloud.firestore {
     }
 
     function isMasterAdmin() {
-      return isAuthenticated() && 
-        request.auth.token.email != null && 
+      return isAuthenticated() &&
+        request.auth.token.email != null &&
         request.auth.token.email.lower() == 'diiogo49@gmail.com';
     }
 
     function isAdmin() {
       return isMasterAdmin() || (
-        isAuthenticated() && 
+        isAuthenticated() &&
         exists(/databases/$(database)/documents/players/$(request.auth.uid)) &&
         get(/databases/$(database)/documents/players/$(request.auth.uid)).data.role == 'admin'
       );
@@ -28,6 +28,13 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function hasSameEmailOwner() {
+      return isAuthenticated() &&
+        request.auth.token.email != null &&
+        resource.data.email != null &&
+        resource.data.email.lower() == request.auth.token.email.lower();
+    }
+
     // ==========================================
     // COLEÇÃO: PLAYERS (ATLETAS E PERFIS)
     // ==========================================
@@ -35,28 +42,38 @@ service cloud.firestore {
       // Leitura permitida para atletas autenticados (escalação, ranking, lista de presença)
       allow read: if isAuthenticated();
 
-      // Criação de perfil no onboarding
+      // Criação de perfil no onboarding (impede auto-promoção a admin, mensalista ou scout falso)
       allow create: if isAuthenticated() && (
         isOwner(playerId) || isAdmin()
       ) && (
-        // Um atleta comum não pode se auto-promover a administrador na criação
-        !('role' in request.resource.data) || 
-        request.resource.data.role == 'player' || 
+        !('role' in request.resource.data) ||
+        request.resource.data.role == 'player' ||
         isMasterAdmin()
+      ) && (
+        isAdmin() || (
+          (!('playerType' in request.resource.data) || request.resource.data.playerType == 'avulso') &&
+          (!('goals' in request.resource.data) || request.resource.data.goals == 0) &&
+          (!('assists' in request.resource.data) || request.resource.data.assists == 0) &&
+          (!('concededGoals' in request.resource.data) || request.resource.data.concededGoals == 0) &&
+          (!('hasNoShowFine' in request.resource.data) || request.resource.data.hasNoShowFine == false) &&
+          (!('hasLateRemovalFine' in request.resource.data) || request.resource.data.hasLateRemovalFine == false) &&
+          (!('fineAmount' in request.resource.data) || request.resource.data.fineAmount == 0)
+        )
       );
 
       // Atualização de perfil
       allow update: if isAuthenticated() && (
         // Administrador pode atualizar qualquer campo
         isAdmin() ||
-        // O próprio atleta atualizando seu perfil/status
-        (isOwner(playerId) && (
-          // Proteção contra elevação de privilégios: não pode alterar o campo 'role'
-          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']) ||
-           request.resource.data.role == resource.data.role) &&
-          // Não pode alterar multas diretamente
-          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['hasNoShowFine', 'hasLateRemovalFine', 'fineAmount']) ||
-           isAdmin())
+        // O próprio atleta atualizando seu perfil/presença/push
+        ((isOwner(playerId) || hasSameEmailOwner()) && (
+          // FE-02: Impede elevação de privilégios e alteração de categoria contratual
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'playerType'])) &&
+          // FE-02: Protege estatísticas oficiais da temporada contra edição direta pelo atleta
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['goals', 'assists', 'concededGoals', 'totalGames', 'totalWins'])) &&
+          // FE-02: Protege campos de multa contra redução/remoção arbitrária (permite apenas assinalar multa por retirada tardia)
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['hasNoShowFine', 'hasLateRemovalFine', 'fineAmount', 'fineReason']) ||
+           (request.resource.data.hasLateRemovalFine == true && request.resource.data.fineAmount >= 0))
         ))
       );
 
@@ -69,9 +86,8 @@ service cloud.firestore {
     // ==========================================
     match /matches/{matchId} {
       allow read: if isAuthenticated();
-      allow create, delete: if isAdmin();
-      // Atualizações de presença ou configurações da partida
-      allow update: if isAuthenticated();
+      // FE-01: Somente administradores podem criar, editar configurações ou excluir partidas
+      allow create, update, delete: if isAdmin();
     }
 
     // ==========================================
@@ -89,10 +105,27 @@ service cloud.firestore {
     match /settings/{settingId} {
       // CoverTeam e System podem ser lidos publicamente para preview social e manutenção
       allow read: if isAuthenticated() || settingId == 'coverTeam' || settingId == 'system';
-      
-      // Apenas administradores alteram financeiro, manutenção ou time da capa
-      // Exceção: reminders pode ser sincronizado por rotina de sistema autenticada
-      allow write: if isAdmin() || (settingId == 'reminders' && isAuthenticated());
+
+      // FE-05: Apenas administradores alteram configurações financeiras, sistema ou time da capa
+      // Exceção controlada: registro de disparo automático de lembrete de véspera apenas com campos permitidos
+      allow write: if isAdmin() || (
+        settingId == 'reminders' &&
+        isAuthenticated() &&
+        request.resource.data.keys().hasOnly([
+          'lastAutoEveReminderKey',
+          'lastAutoEveSentAt',
+          'pendingCountAtSend',
+          'lastManualReminderAt'
+        ])
+      );
+    }
+
+    // ==========================================
+    // COLEÇÃO: COVERTEAMHISTORY (HISTÓRICO DA CAPA)
+    // ==========================================
+    match /coverTeamHistory/{historyId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     // ==========================================
@@ -124,7 +157,12 @@ service cloud.firestore {
     // ==========================================
     match /notifications/{notifId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      // FE-05: Exige que o remetente corresponda ao usuário autenticado (ou rotina de véspera)
+      allow create: if isAuthenticated() && (
+        isAdmin() ||
+        request.resource.data.senderId == request.auth.uid ||
+        request.resource.data.senderId == 'system_auto_eve'
+      );
       allow update, delete: if isAdmin();
     }
 
@@ -132,8 +170,12 @@ service cloud.firestore {
     // COLEÇÃO: LATEREMOVALS (AUDITORIA DE MULTAS)
     // ==========================================
     match /lateRemovals/{removalId} {
-      allow read: if isAdmin();
-      allow create: if isAuthenticated();
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.playerId == request.auth.uid);
+      // FE-05: Impede forjar registro de desistência tardia em nome de outro atleta
+      allow create: if isAuthenticated() && (
+        isAdmin() ||
+        request.resource.data.playerId == request.auth.uid
+      );
       allow update, delete: if isAdmin();
     }
 

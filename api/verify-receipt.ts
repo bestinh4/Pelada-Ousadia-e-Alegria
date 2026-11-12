@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import { requireFirebaseAuth, checkRateLimit, getClientIp, createReceiptSignature } from "./_auth.ts";
 
 export interface VerifyReceiptInput {
   base64Data: string;
@@ -23,6 +24,7 @@ export interface VerifyReceiptOutput {
   summary: string;
   rejectionReason?: string;
   requiresManualReview?: boolean;
+  verificationSignature?: string;
 }
 
 export async function analyzeReceiptWithGemini(input: VerifyReceiptInput): Promise<VerifyReceiptOutput> {
@@ -215,6 +217,14 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  const user = await requireFirebaseAuth(req, res);
+  if (!user) return;
+
+  const clientIp = getClientIp(req);
+  if (!checkRateLimit(`receipt_${user.uid}_${clientIp}`, 15, 60000)) {
+    return res.status(429).json({ error: "Limite de tentativas excedido. Aguarde um minuto." });
+  }
+
   try {
     const { base64Data, mimeType, expectedAmount, receiverName, pixKey, playerName } = req.body || {};
     
@@ -242,7 +252,19 @@ export default async function handler(req: any, res: any) {
       playerName: typeof playerName === "string" ? playerName.slice(0, 100) : undefined,
     });
 
-    return res.status(200).json(result);
+    const verificationSignature = createReceiptSignature({
+      transactionId: result.transactionId || '',
+      extractedAmount: result.extractedAmount || 0,
+      expectedAmount: safeExpectedAmount,
+      isApproved: Boolean(result.isApproved),
+      uid: user.uid,
+    });
+
+    return res.status(200).json({
+      ...result,
+      verifiedByUid: user.uid,
+      ...(verificationSignature ? { verificationSignature } : {}),
+    });
   } catch (error: any) {
     console.error("Erro na verificação de comprovante:", error);
     // Em caso de falha de execução, NUNCA aprovar automaticamente!

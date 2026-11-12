@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Match, Player, Page, PixConfig } from '../types.ts';
 import { db, doc, getDoc, updateDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, query, where, orderBy, limit } from '../services/firebase.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from '../constants.tsx';
-import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder } from '../services/notificationService.ts';
+import { getNotificationStatus, requestNotificationPermission, broadcastNotification, sendPendingAthletesReminder, sendBackgroundPushOnly, testBackgroundPush } from '../services/notificationService.ts';
 import { isLateRemovalTime, checkLateRemovalDeadline, checkMatchEveInfo } from '../utils/timeUtils.ts';
 import { DEFAULT_PIX_CONFIG } from '../utils/pixUtils.ts';
 import { PixPaymentModal, PixIcon } from '../components/PixPaymentModal.tsx';
@@ -200,12 +200,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     ? match.location
     : 'Granja Cantinho do Céu';
 
-  // Sincronizar no Firestore se o local salvo anteriormente estiver apenas como "Granja"
+  // Sincronizar no Firestore se o local salvo anteriormente estiver apenas como "Granja" (somente Admin)
   useEffect(() => {
-    if (match?.id && match.location?.trim().toLowerCase() === 'granja') {
+    if (isCurrentUserAdmin && match?.id && match.location?.trim().toLowerCase() === 'granja') {
       updateDoc(doc(db, "matches", match.id), { location: 'Granja Cantinho do Céu' }).catch(() => {});
     }
-  }, [match]);
+  }, [match, isCurrentUserAdmin]);
 
   // Auto-cura: Se o atleta possui comprovante aprovado para esta pelada mas o status consta como pendente, sincronizar para 'pago'
   useEffect(() => {
@@ -286,12 +286,16 @@ const Dashboard: React.FC<DashboardProps> = ({
           updates.fineAmount = prices.multa || 20;
           updates.suplenteNextMatch = true;
         } else {
-          // Retirou ANTES das 18h: 100% ISENTO! Limpa multas e pendências de falta
-          updates.hasLateRemovalFine = false;
-          updates.hasNoShowFine = false;
-          updates.fineAmount = 0;
-          updates.fineReason = null;
-          updates.suplenteNextMatch = false;
+          // Retirou ANTES das 18h: 100% ISENTO! Só limpa flags caso existissem
+          if (currentPlayer?.suplenteNextMatch) {
+            updates.suplenteNextMatch = false;
+          }
+          if (isCurrentUserAdmin && (currentPlayer?.hasLateRemovalFine || currentPlayer?.hasNoShowFine || (currentPlayer?.fineAmount || 0) > 0)) {
+            updates.hasLateRemovalFine = false;
+            updates.hasNoShowFine = false;
+            updates.fineAmount = 0;
+            updates.fineReason = null;
+          }
         }
       }
 
@@ -299,6 +303,14 @@ const Dashboard: React.FC<DashboardProps> = ({
       await setDoc(doc(db, "players", targetId), updates, { merge: true });
       if (targetId !== user.uid) {
         await setDoc(doc(db, "players", user.uid), updates, { merge: true }).catch(() => {});
+      }
+
+      // Dispara Web Push em segundo plano para colegas com o aplicativo fechado ou minimizado
+      const actorName = currentPlayer?.name || user.displayName || 'Atleta';
+      if (newStatus === 'presente') {
+        sendBackgroundPushOnly('✅ CONFIRMADO!', `${actorName} vai pro jogo!`, user.uid, 'single');
+      } else {
+        sendBackgroundPushOnly('🚫 RECUSOU!', `${actorName} não poderá participar.`, user.uid, 'single');
       }
 
       // Sincronizar com a sessão ativa de equipes (se o sorteio já tiver sido realizado)
@@ -669,7 +681,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             {getNotificationStatus() === 'default' && (
               <button
                 type="button"
-                onClick={() => requestNotificationPermission(user?.uid)}
+                onClick={() => requestNotificationPermission(user?.uid, currentPlayer?.id)}
                 className="min-h-[40px] px-3 py-2 rounded-xl bg-white hover:bg-surface-container text-navy-deep border border-amber-400/50 font-label-md text-xs font-bold flex items-center gap-1 active:scale-95 transition-all"
                 title="Ativar lembretes push no celular"
               >
@@ -847,11 +859,11 @@ const Dashboard: React.FC<DashboardProps> = ({
             <span>Testar Apito 🔊</span>
           </button>
 
-          {getNotificationStatus() !== 'granted' && (
+          {getNotificationStatus() !== 'granted' ? (
             <button
               type="button"
               onClick={async () => {
-                const ok = await requestNotificationPermission(user?.uid);
+                const ok = await requestNotificationPermission(user?.uid, currentPlayer?.id);
                 if (ok) {
                   playWhistleSound('double');
                   alert("🔔 Notificações ativadas! O apito do juiz tocará no seu celular e no PC.");
@@ -861,6 +873,21 @@ const Dashboard: React.FC<DashboardProps> = ({
             >
               <span className="material-symbols-outlined text-[16px]">notifications_active</span>
               <span>Ativar no Celular</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await testBackgroundPush(user?.uid, currentPlayer?.id, 5);
+                if (!res.ok) {
+                  alert(res.error || 'Não foi possível agendar o push em segundo plano.');
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 font-label-md text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all shadow-xs"
+              title="Agenda um push real em 5 segundos para testar com o app minimizado ou fechado"
+            >
+              <span className="material-symbols-outlined text-[16px]">notifications_paused</span>
+              <span>Testar 2º Plano (5s)</span>
             </button>
           )}
         </div>

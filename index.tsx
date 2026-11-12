@@ -65,7 +65,8 @@ if ('serviceWorker' in navigator) {
       registration.update().catch(() => {});
       if ('caches' in window) {
         const keys = await caches.keys();
-        await Promise.all(keys.map(k => caches.delete(k)));
+        const preserved = new Set(['oa-shared-receipt-cache', 'oa-notif-state', 'oa-elite-pro-v21']);
+        await Promise.all(keys.filter(k => !preserved.has(k)).map(k => caches.delete(k)));
       }
 
       document.addEventListener('visibilitychange', () => {

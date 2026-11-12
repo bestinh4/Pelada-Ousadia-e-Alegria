@@ -1,9 +1,23 @@
-
-import { db, doc, updateDoc, collection, addDoc, getDocs, query, where, messaging, getToken, onMessage } from './firebase.ts';
+import {
+  auth,
+  db,
+  doc,
+  setDoc,
+  updateDoc,
+  collection,
+  addDoc,
+  getDocs,
+  query,
+  where,
+  messaging,
+  getToken,
+  onMessage,
+} from './firebase.ts';
 import { playWhistleSound, WhistlePattern } from '../utils/sound.ts';
 import { VAPID_PUBLIC_KEY } from '../constants/vapid.ts';
 
 const VAPID_KEY = VAPID_PUBLIC_KEY;
+const MY_ENDPOINT_STORAGE_KEY = 'oa_my_push_endpoint';
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -16,6 +30,71 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+function isSameApplicationServerKey(subscription: PushSubscription, vapidPublicKey: string): boolean {
+  try {
+    const existingKeyBuffer = subscription.options?.applicationServerKey;
+    if (!existingKeyBuffer) return false;
+    const existingBytes = new Uint8Array(existingKeyBuffer);
+    const expectedBytes = urlBase64ToUint8Array(vapidPublicKey);
+    if (existingBytes.length !== expectedBytes.length) return false;
+    for (let i = 0; i < existingBytes.length; i++) {
+      if (existingBytes[i] !== expectedBytes[i]) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  try {
+    const idToken = await auth.currentUser?.getIdToken?.();
+    if (idToken) {
+      headers['Authorization'] = `Bearer ${idToken}`;
+    }
+  } catch {}
+  return headers;
+}
+
+async function ensureActivePushSubscription(
+  registration: ServiceWorkerRegistration
+): Promise<PushSubscription | null> {
+  let subscription = await registration.pushManager.getSubscription();
+  if (subscription && !isSameApplicationServerKey(subscription, VAPID_PUBLIC_KEY)) {
+    try {
+      await subscription.unsubscribe();
+    } catch {}
+    subscription = null;
+  }
+
+  if (!subscription) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+  }
+  return subscription;
+}
+
+async function savePushDataToPlayerDocs(
+  userId: string,
+  playerDocId: string | undefined,
+  payload: Record<string, any>
+) {
+  const targetIds = new Set<string>([userId]);
+  if (playerDocId && playerDocId !== userId) {
+    targetIds.add(playerDocId);
+  }
+  await Promise.allSettled(
+    Array.from(targetIds).map((id) =>
+      setDoc(doc(db, 'players', id), payload, { merge: true }).catch(() =>
+        updateDoc(doc(db, 'players', id), payload)
+      )
+    )
+  );
+}
+
 export const getNotificationStatus = () => {
   if (!('Notification' in window)) return 'unsupported';
   return Notification.permission;
@@ -23,107 +102,120 @@ export const getNotificationStatus = () => {
 
 /**
  * Garante silenciosamente que o atleta autenticado com permissão ativa
- * tenha a inscrição W3C Web Push registrada e atualizada no Firestore.
+ * tenha a inscrição W3C Web Push (com chave VAPID validada) e token FCM salvos no Firestore.
  */
-export const syncPushSubscription = async (userId: string) => {
+export const syncPushSubscription = async (userId: string, playerDocId?: string) => {
   if (!userId || typeof window === 'undefined') return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if (!('serviceWorker' in navigator)) return;
 
   try {
     const registration = await navigator.serviceWorker.ready;
-    let subscription = await registration.pushManager.getSubscription();
-    if (!subscription) {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-      });
-    }
+    const subscription = await ensureActivePushSubscription(registration);
+    const updates: Record<string, any> = {
+      pushEnabled: true,
+      lastPushSyncAt: new Date().toISOString(),
+    };
 
     if (subscription) {
       const subJson = subscription.toJSON();
-      await updateDoc(doc(db, "players", userId), {
-        pushEnabled: true,
-        pushSubscription: subJson,
-        lastPushSyncAt: new Date().toISOString()
-      }).catch(() => {});
+      updates.pushSubscription = subJson;
+      try {
+        if (subJson.endpoint) {
+          localStorage.setItem(MY_ENDPOINT_STORAGE_KEY, subJson.endpoint);
+        }
+      } catch {}
     }
+
+    if (messaging) {
+      try {
+        const token = await getToken(messaging, {
+          vapidKey: VAPID_KEY,
+          serviceWorkerRegistration: registration,
+        });
+        if (token) {
+          updates.fcmToken = token;
+        }
+      } catch {}
+    }
+
+    // Limpa qualquer assinatura pendente cacheada pelo SW após pushsubscriptionchange
+    if ('caches' in window) {
+      caches
+        .open('oa-notif-state')
+        .then((c) => c.delete('/__pending-push-subscription'))
+        .catch(() => {});
+    }
+
+    await savePushDataToPlayerDocs(userId, playerDocId, updates);
   } catch (err) {
-    console.warn("Aviso ao sincronizar push subscription silenciosamente:", err);
+    console.warn('Aviso ao sincronizar push subscription silenciosamente:', err);
   }
 };
 
-export const requestNotificationPermission = async (userId?: string) => {
+export const requestNotificationPermission = async (userId?: string, playerDocId?: string) => {
   if (!('Notification' in window)) {
     console.warn('⚠️ Notificações não suportadas neste navegador.');
     return false;
   }
 
   try {
-    console.log('🔔 Solicitando permissão de notificação...');
     const permission = await Notification.requestPermission();
-    console.log('🔔 Status da permissão:', permission);
-    
+
     if (permission === 'denied') {
-      alert("As notificações foram bloqueadas. Para recebê-las no celular ou PC mesmo com o app fechado, toque no cadeado ou ícone de configurações ao lado do endereço do site e permita as notificações.");
+      alert(
+        'As notificações foram bloqueadas. Para recebê-las no celular ou PC mesmo com o app fechado, toque no cadeado ou configurações do site no navegador e permita as notificações.'
+      );
     }
-    
+
     if (permission === 'granted') {
-      // Tocar apito de teste para confirmar que o áudio e permissão estão 100% ativos
       playWhistleSound('double');
 
       if (userId) {
-        const userRef = doc(db, "players", userId);
-        await updateDoc(userRef, { pushEnabled: true }).catch(() => {});
-        
-        // 1. Inscrever no padrão W3C Web Push para entrega com app fechado
+        const updates: Record<string, any> = {
+          pushEnabled: true,
+          pushSubscribedAt: new Date().toISOString(),
+          lastPushSyncAt: new Date().toISOString(),
+        };
+
         if ('serviceWorker' in navigator) {
           try {
             const registration = await navigator.serviceWorker.ready;
-            let subscription = await registration.pushManager.getSubscription();
-            if (!subscription) {
-              subscription = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-              });
-            }
-
+            const subscription = await ensureActivePushSubscription(registration);
             if (subscription) {
               const subJson = subscription.toJSON();
-              await updateDoc(userRef, {
-                pushEnabled: true,
-                pushSubscription: subJson,
-                pushSubscribedAt: new Date().toISOString()
-              }).catch(() => {});
-              console.log("✅ Inscrição Web Push para background salva com sucesso!");
+              updates.pushSubscription = subJson;
+              try {
+                if (subJson.endpoint) {
+                  localStorage.setItem(MY_ENDPOINT_STORAGE_KEY, subJson.endpoint);
+                }
+              } catch {}
+            }
+
+            if (messaging) {
+              try {
+                const token = await getToken(messaging, {
+                  vapidKey: VAPID_KEY,
+                  serviceWorkerRegistration: registration,
+                });
+                if (token) {
+                  updates.fcmToken = token;
+                }
+              } catch (err) {
+                console.warn('Aviso ao obter token FCM:', err);
+              }
             }
           } catch (subErr) {
-            console.warn("⚠️ Aviso ao registrar inscrição Web Push:", subErr);
+            console.warn('⚠️ Aviso ao registrar inscrição Web Push:', subErr);
           }
         }
 
-        // 2. Obter Token FCM como contingência
-        if (messaging) {
-          try {
-            const registration = await navigator.serviceWorker.ready;
-            const token = await getToken(messaging, { 
-              vapidKey: VAPID_KEY,
-              serviceWorkerRegistration: registration
-            });
-            
-            if (token) {
-              console.log("✅ Token FCM obtido:", token);
-              await updateDoc(userRef, { fcmToken: token }).catch(() => {});
-            }
-          } catch (err) {
-            console.error("❌ Erro ao obter token FCM:", err);
-          }
-        }
+        await savePushDataToPlayerDocs(userId, playerDocId, updates);
       }
     }
     return permission === 'granted';
   } catch (error) {
-    console.error("❌ Erro ao solicitar permissão:", error);
+    console.error('❌ Erro ao solicitar permissão:', error);
     return false;
   }
 };
@@ -131,13 +223,62 @@ export const requestNotificationPermission = async (userId?: string) => {
 export const setupForegroundNotifications = () => {
   if (messaging) {
     onMessage(messaging, (payload) => {
-      console.log('📥 Notificação em foreground recebida:', payload);
       if (payload.notification) {
-        sendPushNotification(payload.notification.title || 'O&A', payload.notification.body || '', 'single');
+        sendPushNotification(
+          payload.notification.title || 'O&A',
+          payload.notification.body || '',
+          'single'
+        );
       }
     });
   }
 };
+
+async function collectTargetRecipients(
+  targetStatus: 'all' | 'pendente',
+  excludeUserId?: string
+): Promise<{ subscriptions: any[]; tokens: string[] }> {
+  const subscriptions: any[] = [];
+  const tokens: string[] = [];
+  const seenEndpoints = new Set<string>();
+  const seenTokens = new Set<string>();
+
+  let myEndpoint = '';
+  try {
+    myEndpoint = localStorage.getItem(MY_ENDPOINT_STORAGE_KEY) || '';
+  } catch {}
+
+  try {
+    const qPlayers = query(collection(db, 'players'), where('pushEnabled', '==', true));
+    const playersSnap = await getDocs(qPlayers);
+    playersSnap.forEach((docSnap) => {
+      const p = docSnap.data();
+      if (excludeUserId && (docSnap.id === excludeUserId || p.id === excludeUserId)) {
+        return;
+      }
+      if (targetStatus === 'pendente') {
+        const st = p.status || 'pendente';
+        if (st !== 'pendente') return;
+      }
+      if (p.pushSubscription && p.pushSubscription.endpoint) {
+        const ep = p.pushSubscription.endpoint;
+        if (excludeUserId && myEndpoint && ep === myEndpoint) return;
+        if (!seenEndpoints.has(ep)) {
+          seenEndpoints.add(ep);
+          subscriptions.push(p.pushSubscription);
+        }
+      }
+      if (p.fcmToken && typeof p.fcmToken === 'string' && !seenTokens.has(p.fcmToken)) {
+        seenTokens.add(p.fcmToken);
+        tokens.push(p.fcmToken);
+      }
+    });
+  } catch (qErr) {
+    console.warn('Aviso ao buscar destinatários push:', qErr);
+  }
+
+  return { subscriptions, tokens };
+}
 
 export const broadcastNotification = async (
   title: string,
@@ -150,55 +291,139 @@ export const broadcastNotification = async (
     // 1. Tocar som de apito localmente imediatamente para o usuário atual
     playWhistleSound(soundPattern);
 
-    // 2. Salvar no Firestore (para histórico e entrega em tempo real para todos os celulares e computadores conectados)
-    await addDoc(collection(db, "notifications"), {
+    // 2. Salvar no Firestore (histórico + entrega em tempo real para telas abertas)
+    const docRef = await addDoc(collection(db, 'notifications'), {
       title,
       body,
       createdAt: new Date().toISOString(),
       type: targetStatus === 'pendente' ? 'pending_reminder' : 'broadcast',
       targetStatus,
       soundPattern,
-      senderId: senderId || null
+      senderId: senderId || auth.currentUser?.uid || null,
     });
 
-    // 3. Buscar todas as inscrições Web Push registradas no Firestore para entrega mesmo com app FECHADO
-    let subscriptions: any[] = [];
-    try {
-      const qPlayers = query(collection(db, "players"), where("pushEnabled", "==", true));
-      const playersSnap = await getDocs(qPlayers);
-      playersSnap.forEach((docSnap) => {
-        const p = docSnap.data();
-        if (targetStatus === 'pendente') {
-          const st = p.status || 'pendente';
-          if (st !== 'pendente') return;
-        }
-        if (p.pushSubscription && p.pushSubscription.endpoint) {
-          subscriptions.push(p.pushSubscription);
-        }
-      });
-      console.log(`📱 Encontradas ${subscriptions.length} inscrições para envio com app fechado.`);
-    } catch (qErr) {
-      console.warn("Aviso ao buscar push subscriptions dos atletas:", qErr);
-    }
+    // 3. Buscar todas as inscrições W3C Web Push e tokens FCM para entrega com app FECHADO ou em SEGUNDO PLANO
+    const { subscriptions, tokens } = await collectTargetRecipients(targetStatus);
+    const headers = await getAuthHeaders();
 
-    // 4. Chamar a API server-side para envio do Web Push em background
     await fetch('/api/send-notification', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        title, 
-        body, 
-        url: '/', 
-        targetStatus, 
+      headers,
+      body: JSON.stringify({
+        title,
+        body,
+        url: '/',
+        targetStatus,
         soundPattern,
-        subscriptions
-      })
+        tag: `oa-broadcast-${docRef.id}`,
+        subscriptions,
+        tokens,
+      }),
     }).catch((err) => {
-      console.warn("Aviso ao disparar Web Push no servidor:", err);
+      console.warn('Aviso ao disparar Web Push no servidor:', err);
+    });
+  } catch (error) {
+    console.error('❌ Erro ao transmitir notificação:', error);
+  }
+};
+
+/**
+ * Envia Push em segundo plano para mudanças de presença sem gerar duplicidade em telas abertas.
+ */
+export const sendBackgroundPushOnly = async (
+  title: string,
+  body: string,
+  actorUid: string,
+  soundPattern: WhistlePattern = 'single'
+) => {
+  try {
+    const { subscriptions, tokens } = await collectTargetRecipients('all', actorUid);
+    if (subscriptions.length === 0 && tokens.length === 0) return;
+
+    const headers = await getAuthHeaders();
+    await fetch('/api/send-notification', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        title,
+        body,
+        url: '/',
+        targetStatus: 'all',
+        soundPattern,
+        tag: `oa-presence-${actorUid.slice(0, 12)}-${Date.now()}`,
+        suppressWhenOpen: true,
+        subscriptions,
+        tokens,
+      }),
+    }).catch(() => {});
+  } catch {}
+};
+
+/**
+ * Agenda um Web Push real no servidor com atraso para testar com o app minimizado ou fechado.
+ */
+export const testBackgroundPush = async (
+  userId: string,
+  playerDocId?: string,
+  delaySeconds: number = 5
+): Promise<{ ok: boolean; error?: string; warning?: string }> => {
+  if (!('Notification' in window)) {
+    return { ok: false, error: 'Seu navegador não suporta notificações push.' };
+  }
+
+  if (Notification.permission !== 'granted') {
+    const granted = await requestNotificationPermission(userId, playerDocId);
+    if (!granted) {
+      return { ok: false, error: 'Permissão de notificação não concedida.' };
+    }
+  } else {
+    await syncPushSubscription(userId, playerDocId);
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await ensureActivePushSubscription(registration);
+    if (!subscription) {
+      return { ok: false, error: 'Não foi possível registrar a inscrição push neste aparelho.' };
+    }
+
+    let fcmToken: string | undefined;
+    if (messaging) {
+      try {
+        fcmToken = await getToken(messaging, {
+          vapidKey: VAPID_KEY,
+          serviceWorkerRegistration: registration,
+        });
+      } catch {}
+    }
+
+    const headers = await getAuthHeaders();
+    const res = await fetch('/api/send-notification', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        title: '🔔 PUSH EM SEGUNDO PLANO ATIVO!',
+        body: 'Mesmo com o app minimizado ou fechado, os avisos da pelada O&A chegarão normalmente.',
+        url: '/',
+        soundPattern: 'double',
+        tag: `oa-bg-test-${Date.now()}`,
+        suppressWhenOpen: false,
+        delayMs: Math.max(0, Math.min(8000, delaySeconds * 1000)),
+        subscriptions: [subscription.toJSON()],
+        tokens: fcmToken ? [fcmToken] : [],
+      }),
     });
 
-  } catch (error) {
-    console.error("❌ Erro ao transmitir notificação:", error);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: data.error || 'Erro ao agendar push no servidor.' };
+    }
+    if (data.warning) {
+      return { ok: false, error: data.warning, warning: data.warning };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Falha de conexão ao testar push em segundo plano.' };
   }
 };
 
@@ -224,118 +449,101 @@ export const sendPendingAthletesReminder = async (
 };
 
 export const sendPushNotification = async (
-  title: string, 
-  body: string, 
+  title: string,
+  body: string,
   soundPattern: WhistlePattern = 'single'
 ) => {
-  // Sempre tocar o apito do juiz sintetizado via Web Audio API
   playWhistleSound(soundPattern);
 
   if (!('Notification' in window)) {
-    console.error("❌ Notificações não são suportadas neste navegador.");
     return;
   }
-  
+
   if (Notification.permission !== 'granted') {
-    console.warn("🚫 Notificações não permitidas pelo usuário.");
     return;
   }
 
   try {
-    const vibratePattern = soundPattern === 'triple' 
-      ? [200, 100, 200, 100, 450]
-      : soundPattern === 'double'
-        ? [200, 100, 250]
-        : soundPattern === 'start'
-          ? [500]
-          : [200];
+    const vibratePattern =
+      soundPattern === 'triple'
+        ? [200, 100, 200, 100, 450]
+        : soundPattern === 'double'
+          ? [200, 100, 250]
+          : soundPattern === 'start'
+            ? [500]
+            : [200];
 
     const options = {
       body,
-      icon: '/pwa-192x192.png',
-      badge: '/pwa-192x192.png',
+      icon: '/pwa-192x192.png?v=21',
+      badge: '/pwa-192x192.png?v=21',
       vibrate: vibratePattern,
       tag: 'oa-notification-' + Date.now(),
       renotify: true,
       requireInteraction: true,
-      data: { url: window.location.origin }
+      data: { url: window.location.origin },
     };
 
-    // Tenta usar o Service Worker primeiro (melhor suporte no celular / Android)
     if ('serviceWorker' in navigator) {
       try {
         const swReadyPromise = navigator.serviceWorker.ready;
         const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1000));
         const registration = await Promise.race([swReadyPromise, timeoutPromise]);
-        
+
         if (registration && registration.showNotification) {
           await registration.showNotification(title, options as any);
           return;
         }
-      } catch (swErr) {
-        console.warn("⚠️ Falha ao usar Service Worker, tentando fallback:", swErr);
-      }
+      } catch {}
     }
-    
-    // Fallback para o objeto Notification padrão
-    const notif = new Notification(title, { 
-      body: options.body, 
+
+    const notif = new Notification(title, {
+      body: options.body,
       icon: options.icon,
-      tag: options.tag
+      tag: options.tag,
     });
-    
+
     notif.onclick = () => {
       window.focus();
       notif.close();
     };
   } catch (error) {
-    console.error("❌ Erro ao disparar notificação:", error);
+    console.error('❌ Erro ao disparar notificação:', error);
   }
 };
 
 export const resetNotificationsRoutine = async (userId?: string) => {
-  console.log("🔄 Iniciando rotina de reset de notificações...");
-  
   try {
-    // 1. Limpar Caches do Navegador
     if ('caches' in window) {
       const keys = await caches.keys();
-      await Promise.all(keys.map(key => caches.delete(key)));
-      console.log("✅ Caches de armazenamento limpos.");
+      await Promise.all(
+        keys.filter((k) => k !== 'oa-shared-receipt-cache').map((key) => caches.delete(key))
+      );
     }
 
-    // 2. Unregister Service Workers
     if ('serviceWorker' in navigator) {
       const registrations = await navigator.serviceWorker.getRegistrations();
       for (const registration of registrations) {
-        // Enviar comando de limpar cache antes de desregistrar
         if (registration.active) {
           registration.active.postMessage({ type: 'CLEAR_CACHE' });
           registration.active.postMessage({ type: 'RESET_NOTIFICATIONS' });
         }
         await registration.unregister();
-        console.log("✅ Service Worker desregistrado.");
       }
 
-      // 3. Re-registrar Service Worker
-      const newReg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-      console.log("✅ Novo Service Worker registrado:", newReg.scope);
-      
-      // Aguardar o SW ficar pronto
+      await navigator.serviceWorker.register('/sw.js', { scope: '/' });
       await navigator.serviceWorker.ready;
     }
 
-    // 4. Re-solicitar permissão e atualizar Token
     if (userId) {
-      console.log("🔔 Re-sincronizando permissões para o usuário:", userId);
       await requestNotificationPermission(userId);
     }
 
-    alert("Rotina de limpeza concluída! As notificações foram resetadas e o cache foi limpo.");
+    alert('Rotina de limpeza concluída! As notificações foram resetadas e o cache foi limpo.');
     return true;
   } catch (err) {
-    console.error("❌ Erro na rotina de reset:", err);
-    alert("Ocorreu um erro ao resetar as notificações. Tente recarregar a página.");
+    console.error('❌ Erro na rotina de reset:', err);
+    alert('Ocorreu um erro ao resetar as notificações. Tente recarregar a página.');
     return false;
   }
 };

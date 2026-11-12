@@ -18,6 +18,7 @@ import { Page, Player, Match } from './types.ts';
 import { MASTER_ADMIN_EMAIL, MAIN_LOGO_URL } from './constants.tsx';
 import { auth, db, loginWithGoogle, onAuthStateChanged, onSnapshot, collection, query, orderBy, doc, getDoc, updateDoc, setDoc, getDocs, limit, where } from './services/firebase.ts';
 import { requestNotificationPermission, sendPushNotification, setupForegroundNotifications, sendPendingAthletesReminder, syncPushSubscription } from './services/notificationService.ts';
+import { startBackgroundKeepAlive } from './services/backgroundKeepAlive.ts';
 import { checkMatchEveInfo } from './utils/timeUtils.ts';
 import { playSound, playWhistleSound, WhistlePattern } from './utils/sound.ts';
 
@@ -408,6 +409,18 @@ const App: React.FC = () => {
     p.id === user?.uid || 
     (user?.email && p.email && p.email.toLowerCase() === user.email.toLowerCase())
   );
+
+  // Mantém o Service Worker e a inscrição Web Push sempre sincronizados em segundo plano
+  useEffect(() => {
+    if (!user?.uid) return;
+    syncPushSubscription(user.uid, currentPlayer?.id);
+    const stopKeepAlive = startBackgroundKeepAlive(() => {
+      syncPushSubscription(user.uid, currentPlayer?.id);
+    });
+    return () => {
+      stopKeepAlive();
+    };
+  }, [user?.uid, currentPlayer?.id]);
 
   // SISTEMA AUTOMÁTICO DE LEMBRETES PUSH NA VÉSPERA DA PELADA (PARA ATLETAS COM STATUS PENDENTE)
   useEffect(() => {

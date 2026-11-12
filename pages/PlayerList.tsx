@@ -111,12 +111,12 @@ const PlayerList: React.FC<PlayerListProps> = ({ players, currentUser, match, on
   const gkSlots = 4; // Exatamente e estritamente 4 vagas para goleiros
   const totalSlots = fieldSlots + gkSlots; // 34 atletas titulares no total
 
-  // Garantir que as vagas no banco sejam estritamente 4 goleiros e 30 atletas de linha
+  // Garantir que as vagas no banco sejam estritamente 4 goleiros e 30 atletas de linha (somente Admin)
   useEffect(() => {
-    if (match?.id && (match.gkSlots !== 4 || match.fieldSlots !== 30)) {
+    if (isCurrentUserAdmin && match?.id && (match.gkSlots !== 4 || match.fieldSlots !== 30)) {
       updateDoc(doc(db, "matches", match.id), { gkSlots: 4, fieldSlots: 30 }).catch(() => {});
     }
-  }, [match]);
+  }, [match, isCurrentUserAdmin]);
 
   // Trava de rolagem de tela quando modal estiver aberto (evita descolamento em mobile)
   useEffect(() => {

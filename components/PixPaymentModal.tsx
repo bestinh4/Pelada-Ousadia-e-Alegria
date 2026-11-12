@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Player, Match, PixConfig } from '../types.ts';
 import { generatePixPayload } from '../utils/pixUtils.ts';
-import { db, doc, updateDoc, setDoc, collection, addDoc, getDocs, query, where } from '../services/firebase.ts';
+import { auth, db, doc, updateDoc, setDoc, collection, addDoc, getDocs, query, where } from '../services/firebase.ts';
 import { playSound } from '../utils/sound.ts';
 import { getCurrentMonthKey, getMensalistaPaymentInfo, getMonthName } from '../utils/mensalistaUtils.ts';
 
@@ -263,9 +263,14 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
 
       let data: any = null;
       try {
+        const idToken = await auth.currentUser?.getIdToken?.();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (idToken) {
+          headers['Authorization'] = `Bearer ${idToken}`;
+        }
         const response = await fetch('/api/verify-receipt', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             base64Data: base64ForAi,
             mimeType,
@@ -306,12 +311,25 @@ export const PixPaymentModal: React.FC<PixPaymentModalProps> = ({
       // Verificar se o ID da transação já foi utilizado anteriormente para evitar comprovante duplicado
       const cleanTxId = (data.transactionId || '').trim();
       if (data.isApproved && cleanTxId.length >= 8 && !cleanTxId.startsWith('TX_')) {
-        const dupSnap = await getDocs(
-          query(collection(db, 'receipts'), where('transactionId', '==', cleanTxId))
-        );
+        let dupSnap: any = { empty: true, docs: [] };
+        try {
+          dupSnap = await getDocs(
+            query(
+              collection(db, 'receipts'),
+              where('playerId', '==', player.id),
+              where('transactionId', '==', cleanTxId)
+            )
+          );
+          if (dupSnap.empty) {
+            const globalSnap = await getDocs(
+              query(collection(db, 'receipts'), where('transactionId', '==', cleanTxId))
+            ).catch(() => null);
+            if (globalSnap) dupSnap = globalSnap;
+          }
+        } catch {}
         if (!dupSnap.empty) {
           // Se o comprovante já existente pertence a este mesmo atleta, revalidar imediatamente sem travar
-          const samePlayerReceipt = dupSnap.docs.find(d => {
+          const samePlayerReceipt = dupSnap.docs.find((d: any) => {
             const rData = d.data();
             return (
               rData.playerId === player.id ||
