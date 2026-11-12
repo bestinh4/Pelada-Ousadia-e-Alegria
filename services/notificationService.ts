@@ -18,6 +18,37 @@ import { VAPID_PUBLIC_KEY } from '../constants/vapid.ts';
 
 const VAPID_KEY = VAPID_PUBLIC_KEY;
 const MY_ENDPOINT_STORAGE_KEY = 'oa_my_push_endpoint';
+const FCM_SKIP_UNTIL_KEY = 'oa_fcm_skip_until';
+let lastSyncAttemptMs = 0;
+
+function shouldAttemptFcmToken(): boolean {
+  if (!messaging) return false;
+  try {
+    const skipUntil = Number(localStorage.getItem(FCM_SKIP_UNTIL_KEY) || '0');
+    if (skipUntil && Date.now() < skipUntil) {
+      return false;
+    }
+  } catch {}
+  return true;
+}
+
+async function safeTryGetFcmToken(registration: ServiceWorkerRegistration): Promise<string | null> {
+  if (!shouldAttemptFcmToken() || !messaging) return null;
+  try {
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: registration,
+    });
+    return token || null;
+  } catch {
+    // Evita repetir POST 401 para fcmregistrations.googleapis.com a cada foco/visibilidade;
+    // W3C Web Push (pushManager.subscribe) continua 100% ativo sem depender do endpoint FCM.
+    try {
+      localStorage.setItem(FCM_SKIP_UNTIL_KEY, String(Date.now() + 24 * 60 * 60 * 1000));
+    } catch {}
+    return null;
+  }
+}
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -109,6 +140,10 @@ export const syncPushSubscription = async (userId: string, playerDocId?: string)
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if (!('serviceWorker' in navigator)) return;
 
+  const now = Date.now();
+  if (now - lastSyncAttemptMs < 8000) return;
+  lastSyncAttemptMs = now;
+
   try {
     const registration = await navigator.serviceWorker.ready;
     const subscription = await ensureActivePushSubscription(registration);
@@ -127,16 +162,9 @@ export const syncPushSubscription = async (userId: string, playerDocId?: string)
       } catch {}
     }
 
-    if (messaging) {
-      try {
-        const token = await getToken(messaging, {
-          vapidKey: VAPID_KEY,
-          serviceWorkerRegistration: registration,
-        });
-        if (token) {
-          updates.fcmToken = token;
-        }
-      } catch {}
+    const token = await safeTryGetFcmToken(registration);
+    if (token) {
+      updates.fcmToken = token;
     }
 
     // Limpa qualquer assinatura pendente cacheada pelo SW após pushsubscriptionchange
@@ -192,18 +220,9 @@ export const requestNotificationPermission = async (userId?: string, playerDocId
               } catch {}
             }
 
-            if (messaging) {
-              try {
-                const token = await getToken(messaging, {
-                  vapidKey: VAPID_KEY,
-                  serviceWorkerRegistration: registration,
-                });
-                if (token) {
-                  updates.fcmToken = token;
-                }
-              } catch (err) {
-                console.warn('Aviso ao obter token FCM:', err);
-              }
+            const token = await safeTryGetFcmToken(registration);
+            if (token) {
+              updates.fcmToken = token;
             }
           } catch (subErr) {
             console.warn('⚠️ Aviso ao registrar inscrição Web Push:', subErr);
@@ -387,15 +406,7 @@ export const testBackgroundPush = async (
       return { ok: false, error: 'Não foi possível registrar a inscrição push neste aparelho.' };
     }
 
-    let fcmToken: string | undefined;
-    if (messaging) {
-      try {
-        fcmToken = await getToken(messaging, {
-          vapidKey: VAPID_KEY,
-          serviceWorkerRegistration: registration,
-        });
-      } catch {}
-    }
+    const fcmToken = await safeTryGetFcmToken(registration);
 
     const headers = await getAuthHeaders();
     const res = await fetch('/api/send-notification', {

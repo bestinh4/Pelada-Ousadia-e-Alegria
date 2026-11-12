@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { requireFirebaseAuth, checkRateLimit, getClientIp, createReceiptSignature } from "./_auth.ts";
+import { requireFirebaseAuth, checkRateLimit, getClientIp, createReceiptSignature } from "./_auth.mjs";
 
 export interface VerifyReceiptInput {
   base64Data: string;

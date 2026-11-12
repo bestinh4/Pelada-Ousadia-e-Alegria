@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireFirebaseAuth, checkRateLimit, getClientIp } from './_auth.ts';
-import { sendDualChannelPush } from './_push.ts';
+import { requireFirebaseAuth, checkRateLimit, getClientIp } from './_auth.mjs';
+import { sendDualChannelPush } from './_push.mjs';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'POST') {
@@ -18,7 +18,16 @@ export default async function handler(request: VercelRequest, response: VercelRe
     });
   }
 
-  const { title, body } = request.body || {};
+  let parsedBody: any = request.body || {};
+  if (typeof request.body === 'string') {
+    try {
+      parsedBody = JSON.parse(request.body);
+    } catch {
+      parsedBody = {};
+    }
+  }
+
+  const { title, body } = parsedBody || {};
   if (!title || typeof title !== 'string' || !body || typeof body !== 'string') {
     return response.status(400).json({
       ok: false,
@@ -27,7 +36,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
   }
 
   try {
-    const result = await sendDualChannelPush(request.body || {});
+    const result = await sendDualChannelPush(parsedBody);
     return response.status(200).json({
       ...result,
       success: true,

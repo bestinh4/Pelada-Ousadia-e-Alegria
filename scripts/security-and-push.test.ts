@@ -9,8 +9,8 @@ import {
   checkRateLimit,
   createReceiptSignature,
   FIREBASE_PROJECT_ID,
-} from '../api/_auth.ts';
-import { sanitizePushPayload, isValidPushSubscription, sendDualChannelPush } from '../api/_push.ts';
+} from '../api/_auth.mjs';
+import { sanitizePushPayload, isValidPushSubscription, sendDualChannelPush } from '../api/_push.mjs';
 import verifyReceiptHandler from '../api/verify-receipt.ts';
 import sendNotificationHandler from '../api/send-notification.ts';
 import { VAPID_PUBLIC_KEY } from '../constants/vapid.ts';

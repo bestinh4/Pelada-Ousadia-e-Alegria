@@ -1,73 +1,71 @@
 import webpush from 'web-push';
 import admin from 'firebase-admin';
-import { VAPID_PUBLIC_KEY, VAPID_SUBJECT } from '../constants/vapid.ts';
 
-export interface PushRequestInput {
-  title?: unknown;
-  body?: unknown;
-  url?: unknown;
-  soundPattern?: unknown;
-  targetStatus?: unknown;
-  tag?: unknown;
-  suppressWhenOpen?: unknown;
-  subscriptions?: unknown;
-  tokens?: unknown;
-  delayMs?: unknown;
+const VAPID_PUBLIC_KEY =
+  'BIXN8KDG-7IS82_ykSdcgndt1wyVaWnz0Y5TLBAPWSJRhbPXV5sHpN2TxxhwA3ZwdOUbVPjhYxFmenwVciZN2xE';
+const VAPID_SUBJECT = 'mailto:diiogo49@gmail.com';
+
+let configuredVapidKey = null;
+
+function cleanEnvValue(raw) {
+  return (raw || '').trim().replace(/^["']|["']$/g, '');
 }
 
-export interface PushDispatchResult {
-  ok: boolean;
-  sentCount: number;
-  failedCount: number;
-  fcmSentCount: number;
-  fcmFailedCount: number;
-  expiredEndpoints: string[];
-  title: string;
-  warning?: string;
+function ensureWebPushConfigured() {
+  const privateKey = cleanEnvValue(process.env.VAPID_PRIVATE_KEY);
+  if (!privateKey) {
+    return { ready: false, error: 'VAPID_PRIVATE_KEY não configurada no servidor.' };
+  }
+  if (configuredVapidKey === privateKey) {
+    return { ready: true };
+  }
+
+  try {
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, privateKey);
+    configuredVapidKey = privateKey;
+    return { ready: true };
+  } catch (err) {
+    console.warn('Aviso ao configurar VAPID:', err?.message || err);
+    return { ready: false, error: 'VAPID_PRIVATE_KEY inválida no servidor.' };
+  }
 }
 
-let configuredVapidKey: string | null = null;
+function ensureFirebaseAdmin() {
+  try {
+    if (admin.apps.length > 0) return true;
+    const rawSa = cleanEnvValue(process.env.FIREBASE_SERVICE_ACCOUNT);
+    if (!rawSa) return false;
 
-function ensureWebPushConfigured(): boolean {
-  const privateKey = (process.env.VAPID_PRIVATE_KEY || '').trim();
-  if (!privateKey) return false;
-  if (configuredVapidKey === privateKey) return true;
-
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, privateKey);
-  configuredVapidKey = privateKey;
-  return true;
+    const serviceAccount = JSON.parse(rawSa);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      projectId: 'ousadia-5b1d8',
+    });
+    return true;
+  } catch (err) {
+    console.warn('Aviso ao inicializar Firebase Admin em _push:', err?.message || err);
+    return false;
+  }
 }
 
-function ensureFirebaseAdmin(): boolean {
-  if (admin.apps.length > 0) return true;
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT) return false;
-
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    projectId: 'ousadia-5b1d8',
-  });
-  return true;
-}
-
-export function sanitizePushPayload(input: PushRequestInput) {
-  const rawTitle = typeof input.title === 'string' ? input.title.trim() : '';
-  const rawBody = typeof input.body === 'string' ? input.body.trim() : '';
+export function sanitizePushPayload(input) {
+  const rawTitle = typeof input?.title === 'string' ? input.title.trim() : '';
+  const rawBody = typeof input?.body === 'string' ? input.body.trim() : '';
   const safeTitle = (rawTitle || 'Ousadia & Alegria').slice(0, 150);
   const safeBody = (rawBody || 'Atualizações na pelada!').slice(0, 300);
   const safeUrl =
-    typeof input.url === 'string' && (input.url.startsWith('/') || input.url.startsWith('https://'))
+    typeof input?.url === 'string' && (input.url.startsWith('/') || input.url.startsWith('https://'))
       ? input.url.slice(0, 200)
       : '/';
   const safeSound =
-    input.soundPattern === 'double' || input.soundPattern === 'triple' || input.soundPattern === 'start'
+    input?.soundPattern === 'double' || input?.soundPattern === 'triple' || input?.soundPattern === 'start'
       ? input.soundPattern
       : 'single';
-  const safeTargetStatus = input.targetStatus === 'pendente' ? 'pendente' : 'all';
-  const rawTag = typeof input.tag === 'string' ? input.tag.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) : '';
+  const safeTargetStatus = input?.targetStatus === 'pendente' ? 'pendente' : 'all';
+  const rawTag = typeof input?.tag === 'string' ? input.tag.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) : '';
   const safeTag = rawTag || `oa-notif-${Date.now()}`;
-  const suppressWhenOpen = Boolean(input.suppressWhenOpen);
-  const parsedDelay = Number(input.delayMs) || 0;
+  const suppressWhenOpen = Boolean(input?.suppressWhenOpen);
+  const parsedDelay = Number(input?.delayMs) || 0;
   const safeDelayMs = Math.max(0, Math.min(8000, parsedDelay));
 
   return {
@@ -82,7 +80,7 @@ export function sanitizePushPayload(input: PushRequestInput) {
   };
 }
 
-export function isValidPushSubscription(sub: any): sub is webpush.PushSubscription {
+export function isValidPushSubscription(sub) {
   return Boolean(
     sub &&
       typeof sub === 'object' &&
@@ -98,7 +96,7 @@ export function isValidPushSubscription(sub: any): sub is webpush.PushSubscripti
   );
 }
 
-export async function sendDualChannelPush(input: PushRequestInput): Promise<PushDispatchResult> {
+export async function sendDualChannelPush(input) {
   const {
     safeTitle,
     safeBody,
@@ -114,8 +112,8 @@ export async function sendDualChannelPush(input: PushRequestInput): Promise<Push
     await new Promise((resolve) => setTimeout(resolve, safeDelayMs));
   }
 
-  const uniqueSubsMap = new Map<string, webpush.PushSubscription>();
-  if (Array.isArray(input.subscriptions)) {
+  const uniqueSubsMap = new Map();
+  if (Array.isArray(input?.subscriptions)) {
     for (const sub of input.subscriptions.slice(0, 250)) {
       if (isValidPushSubscription(sub)) {
         uniqueSubsMap.set(sub.endpoint, sub);
@@ -123,8 +121,8 @@ export async function sendDualChannelPush(input: PushRequestInput): Promise<Push
     }
   }
 
-  const uniqueTokens = new Set<string>();
-  if (Array.isArray(input.tokens)) {
+  const uniqueTokens = new Set();
+  if (Array.isArray(input?.tokens)) {
     for (const token of input.tokens.slice(0, 500)) {
       if (typeof token === 'string' && token.trim().length > 10) {
         uniqueTokens.add(token.trim());
@@ -155,12 +153,12 @@ export async function sendDualChannelPush(input: PushRequestInput): Promise<Push
     }
   }
 
-  const webPushReady = ensureWebPushConfigured();
+  const webPushCheck = ensureWebPushConfigured();
   let sentCount = 0;
   let failedCount = 0;
   let fcmSentCount = 0;
   let fcmFailedCount = 0;
-  const expiredEndpoints: string[] = [];
+  const expiredEndpoints = [];
 
   const jsonPayload = JSON.stringify({
     title: safeTitle,
@@ -172,7 +170,7 @@ export async function sendDualChannelPush(input: PushRequestInput): Promise<Push
     sentAt: Date.now(),
   });
 
-  if (webPushReady && uniqueSubsMap.size > 0) {
+  if (webPushCheck.ready && uniqueSubsMap.size > 0) {
     const subs = Array.from(uniqueSubsMap.values());
     await Promise.allSettled(
       subs.map(async (sub) => {
@@ -183,7 +181,7 @@ export async function sendDualChannelPush(input: PushRequestInput): Promise<Push
             topic: safeTag.slice(0, 32),
           });
           sentCount++;
-        } catch (pushErr: any) {
+        } catch (pushErr) {
           failedCount++;
           if (pushErr?.statusCode === 410 || pushErr?.statusCode === 404) {
             expiredEndpoints.push(sub.endpoint);
@@ -225,7 +223,7 @@ export async function sendDualChannelPush(input: PushRequestInput): Promise<Push
         tokens: fcmTokens,
       };
 
-      const result = await admin.messaging().sendEachForMulticast(message as any);
+      const result = await admin.messaging().sendEachForMulticast(message);
       fcmSentCount = result.successCount;
       fcmFailedCount = result.failureCount;
     } catch (fcmErr) {
@@ -233,13 +231,13 @@ export async function sendDualChannelPush(input: PushRequestInput): Promise<Push
     }
   }
 
-  let warning: string | undefined;
-  if (!webPushReady && uniqueSubsMap.size > 0) {
-    warning = 'VAPID_PRIVATE_KEY não configurada no servidor.';
+  let warning;
+  if (!webPushCheck.ready && uniqueSubsMap.size > 0) {
+    warning = webPushCheck.error;
   }
 
   return {
-    ok: webPushReady || hasAdminCreds,
+    ok: webPushCheck.ready || hasAdminCreds,
     sentCount,
     failedCount,
     fcmSentCount,

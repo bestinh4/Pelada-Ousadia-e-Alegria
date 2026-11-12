@@ -5,26 +5,15 @@ export const FIREBASE_PROJECT_ID = 'ousadia-5b1d8';
 const GOOGLE_CERTS_URL =
   'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
 
-export interface VerifiedAuthUser {
-  uid: string;
-  email?: string;
-  name?: string;
-}
+let certCache = null;
 
-interface CertCacheEntry {
-  certs: Record<string, string>;
-  expiresAt: number;
-}
-
-let certCache: CertCacheEntry | null = null;
-
-function base64UrlDecode(input: string): Buffer {
+function base64UrlDecode(input) {
   const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
   const padLen = (4 - (normalized.length % 4)) % 4;
   return Buffer.from(normalized + '='.repeat(padLen), 'base64');
 }
 
-async function getGooglePublicCerts(): Promise<Record<string, string>> {
+async function getGooglePublicCerts() {
   const now = Date.now();
   if (certCache && now < certCache.expiresAt) {
     return certCache.certs;
@@ -35,7 +24,7 @@ async function getGooglePublicCerts(): Promise<Record<string, string>> {
     throw new Error(`Falha ao obter certificados públicos do Firebase (${res.status})`);
   }
 
-  const certs = (await res.json()) as Record<string, string>;
+  const certs = await res.json();
   const cacheControl = res.headers.get('cache-control') || '';
   const maxAgeMatch = cacheControl.match(/max-age=(\d+)/i);
   const maxAgeSec = maxAgeMatch ? Math.max(60, Number(maxAgeMatch[1])) : 3600;
@@ -47,10 +36,7 @@ async function getGooglePublicCerts(): Promise<Record<string, string>> {
   return certs;
 }
 
-export async function verifyFirebaseJwtWithCerts(
-  token: string,
-  certsOverride?: Record<string, string>
-): Promise<VerifiedAuthUser> {
+export async function verifyFirebaseJwtWithCerts(token, certsOverride) {
   if (!token || typeof token !== 'string') {
     throw new Error('Token de autenticação ausente.');
   }
@@ -61,8 +47,8 @@ export async function verifyFirebaseJwtWithCerts(
   }
 
   const [headerB64, payloadB64, signatureB64] = parts;
-  let header: any;
-  let payload: any;
+  let header;
+  let payload;
   try {
     header = JSON.parse(base64UrlDecode(headerB64).toString('utf8'));
     payload = JSON.parse(base64UrlDecode(payloadB64).toString('utf8'));
@@ -114,7 +100,7 @@ export async function verifyFirebaseJwtWithCerts(
   };
 }
 
-export async function verifyFirebaseIdToken(token: string): Promise<VerifiedAuthUser> {
+export async function verifyFirebaseIdToken(token) {
   if (admin.apps.length > 0 && process.env.FIREBASE_SERVICE_ACCOUNT) {
     const decoded = await admin.auth().verifyIdToken(token);
     return {
@@ -126,14 +112,14 @@ export async function verifyFirebaseIdToken(token: string): Promise<VerifiedAuth
   return verifyFirebaseJwtWithCerts(token);
 }
 
-export function extractBearerToken(req: any): string | null {
+export function extractBearerToken(req) {
   const header = req?.headers?.authorization || req?.headers?.Authorization;
   if (!header || typeof header !== 'string') return null;
   const match = header.match(/^Bearer\s+(.+)$/i);
   return match ? match[1].trim() : null;
 }
 
-export async function requireFirebaseAuth(req: any, res: any): Promise<VerifiedAuthUser | null> {
+export async function requireFirebaseAuth(req, res) {
   const token = extractBearerToken(req);
   if (!token) {
     res.status(401).json({ ok: false, error: 'Autenticação obrigatória para esta operação.' });
@@ -143,7 +129,7 @@ export async function requireFirebaseAuth(req: any, res: any): Promise<VerifiedA
   try {
     const user = await verifyFirebaseIdToken(token);
     return user;
-  } catch (err: any) {
+  } catch {
     res.status(401).json({
       ok: false,
       error: 'Sessão inválida ou expirada. Recarregue o aplicativo e tente novamente.',
@@ -152,7 +138,7 @@ export async function requireFirebaseAuth(req: any, res: any): Promise<VerifiedA
   }
 }
 
-export function getClientIp(req: any): string {
+export function getClientIp(req) {
   const forwarded = req?.headers?.['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.trim()) {
     return forwarded.split(',')[0].trim();
@@ -160,9 +146,9 @@ export function getClientIp(req: any): string {
   return req?.ip || req?.socket?.remoteAddress || 'unknown';
 }
 
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const rateLimitStore = new Map();
 
-export function checkRateLimit(key: string, maxRequests: number, windowMs: number): boolean {
+export function checkRateLimit(key, maxRequests, windowMs) {
   const now = Date.now();
   if (rateLimitStore.size > 5000) {
     for (const [k, entry] of rateLimitStore.entries()) {
@@ -181,13 +167,7 @@ export function checkRateLimit(key: string, maxRequests: number, windowMs: numbe
   return true;
 }
 
-export function createReceiptSignature(data: {
-  transactionId: string;
-  extractedAmount: number;
-  expectedAmount: number;
-  isApproved: boolean;
-  uid: string;
-}): string | undefined {
+export function createReceiptSignature(data) {
   const secret =
     process.env.RECEIPT_HMAC_SECRET ||
     process.env.VAPID_PRIVATE_KEY ||
