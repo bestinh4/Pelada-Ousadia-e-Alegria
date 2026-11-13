@@ -14,37 +14,109 @@ import {
   onMessage,
 } from './firebase.ts';
 import { playWhistleSound, WhistlePattern } from '../utils/sound.ts';
-import { VAPID_PUBLIC_KEY } from '../constants/vapid.ts';
+import { VAPID_PUBLIC_KEY, isValidVapidPublicKey } from '../constants/vapid.ts';
 
-const VAPID_KEY = VAPID_PUBLIC_KEY;
 const MY_ENDPOINT_STORAGE_KEY = 'oa_my_push_endpoint';
 const FCM_SKIP_UNTIL_KEY = 'oa_fcm_skip_until';
-let lastSyncAttemptMs = 0;
+const SYNC_FP_PREFIX = 'oa_push_sync_fp_';
+const NOTIF_STATE_CACHE = 'oa-notif-state';
+const ACTIVE_VAPID_KEY_CACHE_PATH = '/__active-vapid-public-key';
+const PENDING_SUB_CACHE_PATH = '/__pending-push-subscription';
 
-let cachedVapidPublicKey: string | null = null;
+const syncCooldownByTarget = new Map<string, number>();
+const inFlightSyncByTarget = new Map<string, Promise<void>>();
+let cachedServerVapidKey: string | null = null;
+let serverVapidKeyFetchedAt = 0;
+let inFlightVapidFetch: Promise<string | null> | null = null;
+let loggedKeyMismatchWarning = false;
 
-async function resolveVapidPublicKey(): Promise<string> {
-  if (cachedVapidPublicKey) return cachedVapidPublicKey;
-  const envPublicKey =
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_VAPID_PUBLIC_KEY) || '';
-  if (typeof envPublicKey === 'string' && envPublicKey.trim().length > 20) {
-    const resolved = envPublicKey.trim();
-    cachedVapidPublicKey = resolved;
-    return resolved;
-  }
+const VAPID_KEY_TTL_MS = 5 * 60 * 1000;
+
+async function persistVapidKeyForServiceWorker(key: string): Promise<void> {
+  if (!isValidVapidPublicKey(key)) return;
   try {
-    const res = await fetch('/api/health', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data.vapidPublicKey === 'string' && data.vapidPublicKey.trim().length > 20) {
-        const resolved = data.vapidPublicKey.trim();
-        cachedVapidPublicKey = resolved;
-        return resolved;
-      }
+    if ('caches' in window) {
+      const cache = await caches.open(NOTIF_STATE_CACHE);
+      await cache.put(
+        ACTIVE_VAPID_KEY_CACHE_PATH,
+        new Response(JSON.stringify({ vapidPublicKey: key, updatedAt: Date.now() }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
     }
   } catch {}
-  cachedVapidPublicKey = VAPID_KEY;
-  return VAPID_KEY;
+  try {
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      reg?.active?.postMessage({ type: 'SET_VAPID_PUBLIC_KEY', vapidPublicKey: key });
+    }
+  } catch {}
+}
+
+async function readVapidKeyFromCacheStorage(): Promise<string | null> {
+  try {
+    if (!('caches' in window)) return null;
+    const cache = await caches.open(NOTIF_STATE_CACHE);
+    const res = await cache.match(ACTIVE_VAPID_KEY_CACHE_PATH);
+    if (!res) return null;
+    const data = await res.json();
+    if (data && isValidVapidPublicKey(data.vapidPublicKey)) {
+      return String(data.vapidPublicKey).trim();
+    }
+  } catch {}
+  return null;
+}
+
+export async function resolveVapidPublicKey(forceRefresh = false): Promise<string | null> {
+  const now = Date.now();
+  if (!forceRefresh && cachedServerVapidKey && now - serverVapidKeyFetchedAt < VAPID_KEY_TTL_MS) {
+    return cachedServerVapidKey;
+  }
+
+  if (!inFlightVapidFetch) {
+    inFlightVapidFetch = (async () => {
+      const envPublicKey = isValidVapidPublicKey(VAPID_PUBLIC_KEY) ? VAPID_PUBLIC_KEY : '';
+      try {
+        const res = await fetch('/api/health', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && isValidVapidPublicKey(data.vapidPublicKey)) {
+            const serverKey = String(data.vapidPublicKey).trim();
+            if (envPublicKey && envPublicKey !== serverKey && !loggedKeyMismatchWarning) {
+              loggedKeyMismatchWarning = true;
+              console.warn(
+                'Aviso: VITE_VAPID_PUBLIC_KEY difere de VAPID_PUBLIC_KEY em /api/health. Usando a chave ativa do servidor.'
+              );
+            }
+            cachedServerVapidKey = serverKey;
+            serverVapidKeyFetchedAt = Date.now();
+            await persistVapidKeyForServiceWorker(serverKey);
+            return serverKey;
+          }
+        }
+      } catch {}
+
+      if (envPublicKey) {
+        cachedServerVapidKey = envPublicKey;
+        serverVapidKeyFetchedAt = Date.now();
+        await persistVapidKeyForServiceWorker(envPublicKey);
+        return envPublicKey;
+      }
+
+      const cachedOfflineKey = await readVapidKeyFromCacheStorage();
+      if (cachedOfflineKey) {
+        cachedServerVapidKey = cachedOfflineKey;
+        serverVapidKeyFetchedAt = Date.now();
+        return cachedOfflineKey;
+      }
+
+      return null;
+    })().finally(() => {
+      inFlightVapidFetch = null;
+    });
+  }
+
+  return inFlightVapidFetch;
 }
 
 function shouldAttemptFcmToken(): boolean {
@@ -58,18 +130,18 @@ function shouldAttemptFcmToken(): boolean {
   return true;
 }
 
-async function safeTryGetFcmToken(registration: ServiceWorkerRegistration): Promise<string | null> {
-  if (!shouldAttemptFcmToken() || !messaging) return null;
+async function safeTryGetFcmToken(
+  registration: ServiceWorkerRegistration,
+  activePublicKey: string
+): Promise<string | null> {
+  if (!shouldAttemptFcmToken() || !messaging || !isValidVapidPublicKey(activePublicKey)) return null;
   try {
-    const activePublicKey = await resolveVapidPublicKey();
     const token = await getToken(messaging, {
       vapidKey: activePublicKey,
       serviceWorkerRegistration: registration,
     });
     return token || null;
   } catch {
-    // Evita repetir POST 401 para fcmregistrations.googleapis.com a cada foco/visibilidade;
-    // W3C Web Push (pushManager.subscribe) continua 100% ativo sem depender do endpoint FCM.
     try {
       localStorage.setItem(FCM_SKIP_UNTIL_KEY, String(Date.now() + 24 * 60 * 60 * 1000));
     } catch {}
@@ -88,8 +160,12 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
-function isSameApplicationServerKey(subscription: PushSubscription, vapidPublicKey: string): boolean {
+export function isSameApplicationServerKey(
+  subscription: PushSubscription | { options?: { applicationServerKey?: ArrayBuffer | null } },
+  vapidPublicKey: string
+): boolean {
   try {
+    if (!isValidVapidPublicKey(vapidPublicKey)) return false;
     const existingKeyBuffer = subscription.options?.applicationServerKey;
     if (!existingKeyBuffer) return false;
     const existingBytes = new Uint8Array(existingKeyBuffer);
@@ -104,6 +180,45 @@ function isSameApplicationServerKey(subscription: PushSubscription, vapidPublicK
   }
 }
 
+function isValidSerializedSubscription(sub: any): boolean {
+  return Boolean(
+    sub &&
+      typeof sub === 'object' &&
+      typeof sub.endpoint === 'string' &&
+      sub.endpoint.startsWith('https://') &&
+      sub.keys &&
+      typeof sub.keys.p256dh === 'string' &&
+      sub.keys.p256dh.length > 0 &&
+      typeof sub.keys.auth === 'string' &&
+      sub.keys.auth.length > 0
+  );
+}
+
+async function readPendingPushSubscription(
+  activePublicKey: string
+): Promise<{ subscription: PushSubscriptionJSON; updatedAt: number } | null> {
+  try {
+    if (!('caches' in window)) return null;
+    const cache = await caches.open(NOTIF_STATE_CACHE);
+    const res = await cache.match(PENDING_SUB_CACHE_PATH);
+    if (!res) return null;
+    const data = await res.json();
+    if (!data || !isValidSerializedSubscription(data.subscription)) return null;
+    if (data.vapidPublicKey && data.vapidPublicKey !== activePublicKey) return null;
+    return { subscription: data.subscription, updatedAt: Number(data.updatedAt) || Date.now() };
+  } catch {
+    return null;
+  }
+}
+
+async function clearPendingPushSubscription(): Promise<void> {
+  try {
+    if (!('caches' in window)) return;
+    const cache = await caches.open(NOTIF_STATE_CACHE);
+    await cache.delete(PENDING_SUB_CACHE_PATH);
+  } catch {}
+}
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
@@ -116,11 +231,14 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 }
 
 async function ensureActivePushSubscription(
-  registration: ServiceWorkerRegistration
+  registration: ServiceWorkerRegistration,
+  activePublicKey: string,
+  forceRenew = false
 ): Promise<PushSubscription | null> {
-  const activePublicKey = await resolveVapidPublicKey();
+  if (!isValidVapidPublicKey(activePublicKey)) return null;
+
   let subscription = await registration.pushManager.getSubscription();
-  if (subscription && !isSameApplicationServerKey(subscription, activePublicKey)) {
+  if (subscription && (forceRenew || !isSameApplicationServerKey(subscription, activePublicKey))) {
     try {
       await subscription.unsubscribe();
     } catch {}
@@ -140,18 +258,24 @@ async function savePushDataToPlayerDocs(
   userId: string,
   playerDocId: string | undefined,
   payload: Record<string, any>
-) {
-  const targetIds = new Set<string>([userId]);
-  if (playerDocId && playerDocId !== userId) {
-    targetIds.add(playerDocId);
-  }
-  await Promise.allSettled(
-    Array.from(targetIds).map((id) =>
-      setDoc(doc(db, 'players', id), payload, { merge: true }).catch(() =>
-        updateDoc(doc(db, 'players', id), payload)
-      )
-    )
+): Promise<void> {
+  const primaryId = playerDocId || userId;
+  await setDoc(doc(db, 'players', primaryId), payload, { merge: true }).catch(() =>
+    updateDoc(doc(db, 'players', primaryId), payload)
   );
+
+  if (playerDocId && playerDocId !== userId) {
+    await updateDoc(doc(db, 'players', userId), payload).catch(() => {});
+  }
+}
+
+function clearSyncFingerprintsForUser(userId: string, playerDocId?: string) {
+  try {
+    localStorage.removeItem(`${SYNC_FP_PREFIX}${userId}`);
+    if (playerDocId) {
+      localStorage.removeItem(`${SYNC_FP_PREFIX}${playerDocId}`);
+    }
+  } catch {}
 }
 
 export const getNotificationStatus = () => {
@@ -160,53 +284,114 @@ export const getNotificationStatus = () => {
 };
 
 /**
- * Garante silenciosamente que o atleta autenticado com permissão ativa
- * tenha a inscrição W3C Web Push (com chave VAPID validada) e token FCM salvos no Firestore.
+ * Garante que o atleta autenticado com permissão ativa tenha a inscrição W3C Web Push
+ * (com chave VAPID atual validada) vinculada ao documento correto no Firestore sem gravações repetidas.
  */
-export const syncPushSubscription = async (userId: string, playerDocId?: string) => {
+export const syncPushSubscription = async (
+  userId: string,
+  playerDocId?: string,
+  options?: { force?: boolean }
+): Promise<void> => {
   if (!userId || typeof window === 'undefined') return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if (!('serviceWorker' in navigator)) return;
 
+  const targetKey = `${userId}::${playerDocId || ''}`;
+  const existingPromise = inFlightSyncByTarget.get(targetKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
   const now = Date.now();
-  if (now - lastSyncAttemptMs < 8000) return;
-  lastSyncAttemptMs = now;
+  const lastAttempt = syncCooldownByTarget.get(targetKey) || 0;
+  if (!options?.force && now - lastAttempt < 8000) return;
+  syncCooldownByTarget.set(targetKey, now);
 
-  try {
-    const registration = await navigator.serviceWorker.ready;
-    const subscription = await ensureActivePushSubscription(registration);
-    const updates: Record<string, any> = {
-      pushEnabled: true,
-      lastPushSyncAt: new Date().toISOString(),
-    };
+  const runSync = (async () => {
+    try {
+      const activePublicKey = await resolveVapidPublicKey(Boolean(options?.force));
+      if (!activePublicKey) {
+        console.warn('VAPID_PUBLIC_KEY/VITE_VAPID_PUBLIC_KEY ausente; sincronização push aguardando configuração do servidor.');
+        return;
+      }
 
-    if (subscription) {
-      const subJson = subscription.toJSON();
-      updates.pushSubscription = subJson;
+      const registration = await navigator.serviceWorker.ready;
+      const pendingData = await readPendingPushSubscription(activePublicKey);
+      const subscription = await ensureActivePushSubscription(
+        registration,
+        activePublicKey,
+        Boolean(options?.force)
+      );
+
+      let subJson: PushSubscriptionJSON | null = null;
+      if (subscription) {
+        subJson = subscription.toJSON();
+      } else if (pendingData) {
+        subJson = pendingData.subscription;
+      }
+
+      if (!subJson || !isValidSerializedSubscription(subJson)) {
+        return;
+      }
+
+      const token = await safeTryGetFcmToken(registration, activePublicKey);
+      const primaryId = playerDocId || userId;
+      const fpKey = `${SYNC_FP_PREFIX}${primaryId}`;
+      const fingerprint = JSON.stringify({
+        primaryId,
+        userId,
+        endpoint: subJson.endpoint || '',
+        p256dh: subJson.keys?.p256dh || '',
+        auth: subJson.keys?.auth || '',
+        fcmToken: token || '',
+        vapidPublicKey: activePublicKey,
+        pushEnabled: true,
+      });
+
+      let prevFingerprint = '';
       try {
+        prevFingerprint = localStorage.getItem(fpKey) || '';
+      } catch {}
+
+      if (!options?.force && !pendingData && prevFingerprint === fingerprint) {
+        try {
+          if (subJson.endpoint) {
+            localStorage.setItem(MY_ENDPOINT_STORAGE_KEY, subJson.endpoint);
+          }
+        } catch {}
+        return;
+      }
+
+      const updates: Record<string, any> = {
+        pushEnabled: true,
+        pushSubscription: subJson,
+        lastPushSyncAt: new Date().toISOString(),
+      };
+      if (token) {
+        updates.fcmToken = token;
+      }
+
+      await savePushDataToPlayerDocs(userId, playerDocId, updates);
+
+      try {
+        localStorage.setItem(fpKey, fingerprint);
         if (subJson.endpoint) {
           localStorage.setItem(MY_ENDPOINT_STORAGE_KEY, subJson.endpoint);
         }
       } catch {}
-    }
 
-    const token = await safeTryGetFcmToken(registration);
-    if (token) {
-      updates.fcmToken = token;
+      if (pendingData) {
+        await clearPendingPushSubscription();
+      }
+    } catch (err) {
+      console.warn('Aviso ao sincronizar push subscription silenciosamente:', err);
+    } finally {
+      inFlightSyncByTarget.delete(targetKey);
     }
+  })();
 
-    // Limpa qualquer assinatura pendente cacheada pelo SW após pushsubscriptionchange
-    if ('caches' in window) {
-      caches
-        .open('oa-notif-state')
-        .then((c) => c.delete('/__pending-push-subscription'))
-        .catch(() => {});
-    }
-
-    await savePushDataToPlayerDocs(userId, playerDocId, updates);
-  } catch (err) {
-    console.warn('Aviso ao sincronizar push subscription silenciosamente:', err);
-  }
+  inFlightSyncByTarget.set(targetKey, runSync);
+  return runSync;
 };
 
 export const requestNotificationPermission = async (userId?: string, playerDocId?: string) => {
@@ -228,27 +413,26 @@ export const requestNotificationPermission = async (userId?: string, playerDocId
       playWhistleSound('double');
 
       if (userId) {
+        const activePublicKey = await resolveVapidPublicKey(true);
         const updates: Record<string, any> = {
           pushEnabled: true,
           pushSubscribedAt: new Date().toISOString(),
           lastPushSyncAt: new Date().toISOString(),
         };
 
-        if ('serviceWorker' in navigator) {
+        let subJson: PushSubscriptionJSON | null = null;
+        let token: string | null = null;
+
+        if ('serviceWorker' in navigator && activePublicKey) {
           try {
             const registration = await navigator.serviceWorker.ready;
-            const subscription = await ensureActivePushSubscription(registration);
+            const subscription = await ensureActivePushSubscription(registration, activePublicKey);
             if (subscription) {
-              const subJson = subscription.toJSON();
+              subJson = subscription.toJSON();
               updates.pushSubscription = subJson;
-              try {
-                if (subJson.endpoint) {
-                  localStorage.setItem(MY_ENDPOINT_STORAGE_KEY, subJson.endpoint);
-                }
-              } catch {}
             }
 
-            const token = await safeTryGetFcmToken(registration);
+            token = await safeTryGetFcmToken(registration, activePublicKey);
             if (token) {
               updates.fcmToken = token;
             }
@@ -258,6 +442,28 @@ export const requestNotificationPermission = async (userId?: string, playerDocId
         }
 
         await savePushDataToPlayerDocs(userId, playerDocId, updates);
+
+        if (subJson && activePublicKey) {
+          const primaryId = playerDocId || userId;
+          try {
+            if (subJson.endpoint) {
+              localStorage.setItem(MY_ENDPOINT_STORAGE_KEY, subJson.endpoint);
+            }
+            localStorage.setItem(
+              `${SYNC_FP_PREFIX}${primaryId}`,
+              JSON.stringify({
+                primaryId,
+                userId,
+                endpoint: subJson.endpoint || '',
+                p256dh: subJson.keys?.p256dh || '',
+                auth: subJson.keys?.auth || '',
+                fcmToken: token || '',
+                vapidPublicKey: activePublicKey,
+                pushEnabled: true,
+              })
+            );
+          } catch {}
+        }
       }
     }
     return permission === 'granted';
@@ -327,6 +533,38 @@ async function collectTargetRecipients(
   return { subscriptions, tokens };
 }
 
+async function postNotificationPayload(
+  payload: Record<string, any>,
+  contextUser?: { userId?: string; playerDocId?: string }
+): Promise<{ status: number; ok: boolean; data: any }> {
+  const headers = await getAuthHeaders();
+  const bodyStr = JSON.stringify(payload);
+  const res = await fetch('/api/send-notification', {
+    method: 'POST',
+    headers,
+    body: bodyStr,
+    ...(bodyStr.length < 60000 ? { keepalive: true } : {}),
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  // Somente 410/404 retornados em expiredEndpoints disparam renovação da assinatura local.
+  // Erros 401/403 (auth ou VAPID mismatch) NÃO removem nem desinscrevem assinaturas existentes.
+  if (res.ok && Array.isArray(data.expiredEndpoints) && data.expiredEndpoints.length > 0) {
+    let myEndpoint = '';
+    try {
+      myEndpoint = localStorage.getItem(MY_ENDPOINT_STORAGE_KEY) || '';
+    } catch {}
+    const uid = contextUser?.userId || auth.currentUser?.uid;
+    if (myEndpoint && data.expiredEndpoints.includes(myEndpoint) && uid) {
+      clearSyncFingerprintsForUser(uid, contextUser?.playerDocId);
+      syncPushSubscription(uid, contextUser?.playerDocId, { force: true }).catch(() => {});
+    }
+  }
+
+  return { status: res.status, ok: res.ok, data };
+}
+
 export const broadcastNotification = async (
   title: string,
   body: string,
@@ -335,10 +573,8 @@ export const broadcastNotification = async (
   soundPattern: WhistlePattern = 'single'
 ) => {
   try {
-    // 1. Tocar som de apito localmente imediatamente para o usuário atual
     playWhistleSound(soundPattern);
 
-    // 2. Salvar no Firestore (histórico + entrega em tempo real para telas abertas)
     const docRef = await addDoc(collection(db, 'notifications'), {
       title,
       body,
@@ -349,23 +585,16 @@ export const broadcastNotification = async (
       senderId: senderId || auth.currentUser?.uid || null,
     });
 
-    // 3. Buscar todas as inscrições W3C Web Push e tokens FCM para entrega com app FECHADO ou em SEGUNDO PLANO
     const { subscriptions, tokens } = await collectTargetRecipients(targetStatus);
-    const headers = await getAuthHeaders();
-
-    await fetch('/api/send-notification', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        title,
-        body,
-        url: '/',
-        targetStatus,
-        soundPattern,
-        tag: `oa-broadcast-${docRef.id}`,
-        subscriptions,
-        tokens,
-      }),
+    await postNotificationPayload({
+      title,
+      body,
+      url: '/',
+      targetStatus,
+      soundPattern,
+      tag: `oa-broadcast-${docRef.id}`,
+      subscriptions,
+      tokens,
     }).catch((err) => {
       console.warn('Aviso ao disparar Web Push no servidor:', err);
     });
@@ -387,11 +616,8 @@ export const sendBackgroundPushOnly = async (
     const { subscriptions, tokens } = await collectTargetRecipients('all', actorUid);
     if (subscriptions.length === 0 && tokens.length === 0) return;
 
-    const headers = await getAuthHeaders();
-    await fetch('/api/send-notification', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
+    await postNotificationPayload(
+      {
         title,
         body,
         url: '/',
@@ -401,8 +627,9 @@ export const sendBackgroundPushOnly = async (
         suppressWhenOpen: true,
         subscriptions,
         tokens,
-      }),
-    }).catch(() => {});
+      },
+      { userId: actorUid }
+    ).catch(() => {});
   } catch {}
 };
 
@@ -428,19 +655,24 @@ export const testBackgroundPush = async (
   }
 
   try {
+    const activePublicKey = await resolveVapidPublicKey(true);
+    if (!activePublicKey) {
+      return {
+        ok: false,
+        error: 'Chave pública VAPID não configurada no servidor (/api/health).',
+      };
+    }
+
     const registration = await navigator.serviceWorker.ready;
-    const subscription = await ensureActivePushSubscription(registration);
+    const subscription = await ensureActivePushSubscription(registration, activePublicKey);
     if (!subscription) {
       return { ok: false, error: 'Não foi possível registrar a inscrição push neste aparelho.' };
     }
 
-    const fcmToken = await safeTryGetFcmToken(registration);
+    const fcmToken = await safeTryGetFcmToken(registration, activePublicKey);
 
-    const headers = await getAuthHeaders();
-    const res = await fetch('/api/send-notification', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
+    const { status, ok, data } = await postNotificationPayload(
+      {
         title: '🔔 PUSH EM SEGUNDO PLANO ATIVO!',
         body: 'Mesmo com o app minimizado ou fechado, os avisos da pelada O&A chegarão normalmente.',
         url: '/',
@@ -450,16 +682,38 @@ export const testBackgroundPush = async (
         delayMs: Math.max(0, Math.min(8000, delaySeconds * 1000)),
         subscriptions: [subscription.toJSON()],
         tokens: fcmToken ? [fcmToken] : [],
-      }),
-    });
+      },
+      { userId, playerDocId }
+    );
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
+    if (!ok) {
+      if (status === 401 || status === 403) {
+        return {
+          ok: false,
+          error: data.error || 'Sessão expirada na autenticação da API. Recarregue o aplicativo e tente novamente.',
+        };
+      }
       return { ok: false, error: data.error || 'Erro ao agendar push no servidor.' };
     }
+
+    if (Array.isArray(data.expiredEndpoints) && data.expiredEndpoints.length > 0 && data.sentCount === 0) {
+      return {
+        ok: false,
+        error: 'Inscrição push expirada (410/404) foi renovada automaticamente. Toque novamente para testar.',
+      };
+    }
+
     if (data.warning) {
       return { ok: false, error: data.warning, warning: data.warning };
     }
+
+    if (Number(data.vapidErrorCount) > 0 && Number(data.sentCount) === 0) {
+      return {
+        ok: false,
+        error: 'Falha VAPID (401/403) no serviço de push. Confira se VAPID_PUBLIC_KEY, VITE_VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY pertencem ao mesmo par.',
+      };
+    }
+
     return { ok: true };
   } catch (err: any) {
     return { ok: false, error: err?.message || 'Falha de conexão ao testar push em segundo plano.' };
@@ -514,8 +768,8 @@ export const sendPushNotification = async (
 
     const options = {
       body,
-      icon: '/pwa-192x192.png?v=21',
-      badge: '/pwa-192x192.png?v=21',
+      icon: '/pwa-192x192.png?v=20',
+      badge: '/pwa-192x192.png?v=20',
       vibrate: vibratePattern,
       tag: 'oa-notification-' + Date.now(),
       renotify: true,
@@ -575,6 +829,7 @@ export const resetNotificationsRoutine = async (userId?: string) => {
     }
 
     if (userId) {
+      clearSyncFingerprintsForUser(userId);
       await requestNotificationPermission(userId);
     }
 

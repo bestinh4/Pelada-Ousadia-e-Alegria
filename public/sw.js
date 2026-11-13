@@ -1,12 +1,14 @@
-// Service Worker Oficial — Ousadia & Alegria (Background Push + PWA Offline + Keep-Alive)
-const VAPID_PUBLIC_KEY =
-  'BIXN8KDG-7IS82_ykSdcgndt1wyVaWnz0Y5TLBAPWSJRhbPXV5sHpN2TxxhwA3ZwdOUbVPjhYxFmenwVciZN2xE';
-
+// Service Worker Oficial — Ousadia & Alegria (Background Push W3C + PWA Offline + Keep-Alive)
+const ICON_VERSION = 'v20';
+const ICON_URL = `/pwa-192x192.png?${ICON_VERSION}`;
 const CACHE_NAME = 'oa-elite-pro-v21';
-const PROTECTED_CACHES = new Set([CACHE_NAME, 'oa-shared-receipt-cache', 'oa-notif-state']);
-const APP_SHELL_ASSETS = ['/', '/manifest.json', '/pwa-192x192.png', '/images/ousadia_alegria_crest.png'];
+const NOTIF_STATE_CACHE = 'oa-notif-state';
+const ACTIVE_VAPID_KEY_CACHE_PATH = '/__active-vapid-public-key';
+const PENDING_SUB_CACHE_PATH = '/__pending-push-subscription';
+const PROTECTED_CACHES = new Set([CACHE_NAME, 'oa-shared-receipt-cache', NOTIF_STATE_CACHE]);
+const APP_SHELL_ASSETS = ['/', '/manifest.json?v=20', ICON_URL, '/images/ousadia_alegria_crest.png?v=20'];
 
-// Deduplicação em memória para evitar notificações duplicadas entre W3C Web Push e FCM
+// Deduplicação em memória para evitar notificações duplicadas
 const recentNotifTags = new Map();
 
 function urlBase64ToUint8Array(base64String) {
@@ -20,6 +22,16 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+function isValidVapidPublicKey(key) {
+  if (!key || typeof key !== 'string') return false;
+  try {
+    const bytes = urlBase64ToUint8Array(key.trim());
+    return bytes.length === 65 && bytes[0] === 0x04;
+  } catch {
+    return false;
+  }
+}
+
 function isDuplicateTag(tag) {
   if (!tag) return false;
   const now = Date.now();
@@ -31,49 +43,44 @@ function isDuplicateTag(tag) {
   return false;
 }
 
-// Inicialização resiliente do Firebase Messaging Compat (nunca impede o W3C Push de funcionar se offline)
-let messaging = null;
-try {
-  importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js');
-  importScripts('https://www.gstatic.com/firebasejs/10.7.1/firebase-messaging-compat.js');
+async function saveActiveVapidPublicKey(key) {
+  if (!isValidVapidPublicKey(key)) return;
+  try {
+    const cache = await caches.open(NOTIF_STATE_CACHE);
+    await cache.put(
+      ACTIVE_VAPID_KEY_CACHE_PATH,
+      new Response(JSON.stringify({ vapidPublicKey: key.trim(), updatedAt: Date.now() }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  } catch {}
+}
 
-  if (typeof firebase !== 'undefined') {
-    if (!firebase.apps || firebase.apps.length === 0) {
-      firebase.initializeApp({
-        apiKey: 'AIzaSyBa8kF4pSrx_-GuHVT_hGMgh_UmRc0NBx0',
-        authDomain: 'ousadia-5b1d8.firebaseapp.com',
-        projectId: 'ousadia-5b1d8',
-        storageBucket: 'ousadia-5b1d8.firebasestorage.app',
-        messagingSenderId: '812821310641',
-        appId: '1:812821310641:web:d5256ab8fea0ad1323c690',
-      });
-    }
-    messaging = firebase.messaging();
-    messaging.onBackgroundMessage((payload) => {
-      const tag = payload?.data?.tag || payload?.messageId || `fcm-${Date.now()}`;
-      // Se o payload já traz `notification`, o próprio SDK FCM exibe; caso venha `data`-only, exibimos aqui
-      if (!payload?.notification && payload?.data) {
-        if (isDuplicateTag(tag)) return;
-        const title = payload.data.title || 'Ousadia & Alegria';
-        const body = payload.data.body || 'Novidades na Pelada!';
-        return self.registration.showNotification(title, {
-          body,
-          icon: '/pwa-192x192.png?v=21',
-          badge: '/pwa-192x192.png?v=21',
-          vibrate: [200, 100, 200],
-          tag,
-          renotify: true,
-          requireInteraction: true,
-          data: {
-            url: payload.data.url || '/',
-            soundPattern: payload.data.soundPattern || 'single',
-          },
-        });
+async function getActiveVapidPublicKey() {
+  try {
+    const res = await fetch('/api/health', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && isValidVapidPublicKey(data.vapidPublicKey)) {
+        const cleanKey = data.vapidPublicKey.trim();
+        await saveActiveVapidPublicKey(cleanKey);
+        return cleanKey;
       }
-    });
-  }
-} catch (err) {
-  console.warn('FCM compat indisponível em background; W3C Web Push operando normalmente:', err);
+    }
+  } catch {}
+
+  try {
+    const cache = await caches.open(NOTIF_STATE_CACHE);
+    const cachedRes = await cache.match(ACTIVE_VAPID_KEY_CACHE_PATH);
+    if (cachedRes) {
+      const cachedData = await cachedRes.json();
+      if (cachedData && isValidVapidPublicKey(cachedData.vapidPublicKey)) {
+        return cachedData.vapidPublicKey.trim();
+      }
+    }
+  } catch {}
+
+  return null;
 }
 
 self.addEventListener('install', (event) => {
@@ -163,6 +170,14 @@ self.addEventListener('message', (event) => {
   const type = event.data?.type;
   if (!type) return;
 
+  if (type === 'SET_VAPID_PUBLIC_KEY') {
+    const incomingKey = event.data?.vapidPublicKey;
+    if (isValidVapidPublicKey(incomingKey)) {
+      event.waitUntil(saveActiveVapidPublicKey(incomingKey));
+    }
+    return;
+  }
+
   if (type === 'PING' || type === 'KEEP_ALIVE_PING') {
     if (event.source && typeof event.source.postMessage === 'function') {
       event.source.postMessage({
@@ -207,6 +222,7 @@ self.addEventListener('message', (event) => {
   }
 });
 
+// Processa eventos Web Push padrão W3C e payloads FCM sem bloquear o boot em background com importScripts externos
 self.addEventListener('push', (event) => {
   let data = {
     title: 'Ousadia & Alegria',
@@ -249,8 +265,8 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body: data.body,
-    icon: '/pwa-192x192.png?v=21',
-    badge: '/pwa-192x192.png?v=21',
+    icon: ICON_URL,
+    badge: ICON_URL,
     vibrate: vibratePattern,
     tag: data.tag,
     renotify: true,
@@ -299,37 +315,34 @@ self.addEventListener('push', (event) => {
   );
 });
 
-async function getActiveVapidPublicKey() {
-  try {
-    const res = await fetch('/api/health', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && typeof data.vapidPublicKey === 'string' && data.vapidPublicKey.length > 20) {
-        return data.vapidPublicKey;
-      }
-    }
-  } catch {}
-  return VAPID_PUBLIC_KEY;
-}
-
 // Renovação automática da inscrição Push em segundo plano quando o navegador rotacionar as chaves/endpoint
 self.addEventListener('pushsubscriptionchange', (event) => {
   event.waitUntil(
     (async () => {
       try {
         const activePublicKey = await getActiveVapidPublicKey();
+        if (!activePublicKey) {
+          console.warn('Chave VAPID pública indisponível durante pushsubscriptionchange.');
+          return;
+        }
+
         const newSubscription = await self.registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(activePublicKey),
         });
 
         const subJson = newSubscription.toJSON();
-        const cache = await caches.open('oa-notif-state');
+        const cache = await caches.open(NOTIF_STATE_CACHE);
         await cache.put(
-          '/__pending-push-subscription',
-          new Response(JSON.stringify({ subscription: subJson, updatedAt: Date.now() }), {
-            headers: { 'Content-Type': 'application/json' },
-          })
+          PENDING_SUB_CACHE_PATH,
+          new Response(
+            JSON.stringify({
+              subscription: subJson,
+              vapidPublicKey: activePublicKey,
+              updatedAt: Date.now(),
+            }),
+            { headers: { 'Content-Type': 'application/json' } }
+          )
         );
 
         const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
@@ -354,10 +367,24 @@ self.addEventListener('periodicsync', (event) => {
           const existing = await self.registration.pushManager.getSubscription();
           if (!existing) {
             const activePublicKey = await getActiveVapidPublicKey();
-            await self.registration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: urlBase64ToUint8Array(activePublicKey),
-            });
+            if (activePublicKey) {
+              const created = await self.registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(activePublicKey),
+              });
+              const cache = await caches.open(NOTIF_STATE_CACHE);
+              await cache.put(
+                PENDING_SUB_CACHE_PATH,
+                new Response(
+                  JSON.stringify({
+                    subscription: created.toJSON(),
+                    vapidPublicKey: activePublicKey,
+                    updatedAt: Date.now(),
+                  }),
+                  { headers: { 'Content-Type': 'application/json' } }
+                )
+              );
+            }
           }
           const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
           clients.forEach((c) => c.postMessage({ type: 'SYNC_PUSH_SUBSCRIPTION' }));

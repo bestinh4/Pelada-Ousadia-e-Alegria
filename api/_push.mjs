@@ -1,8 +1,6 @@
 import webpush from 'web-push';
 import admin from 'firebase-admin';
 
-const DEFAULT_VAPID_PUBLIC_KEY =
-  'BIXN8KDG-7IS82_ykSdcgndt1wyVaWnz0Y5TLBAPWSJRhbPXV5sHpN2TxxhwA3ZwdOUbVPjhYxFmenwVciZN2xE';
 const VAPID_SUBJECT = 'mailto:diiogo49@gmail.com';
 
 let configuredVapidPair = null;
@@ -12,15 +10,18 @@ function cleanEnvValue(raw) {
 }
 
 export function getServerVapidPublicKey() {
-  return (
-    cleanEnvValue(process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY) ||
-    DEFAULT_VAPID_PUBLIC_KEY
-  );
+  return cleanEnvValue(process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY);
 }
 
 function ensureWebPushConfigured() {
   const privateKey = cleanEnvValue(process.env.VAPID_PRIVATE_KEY);
   const publicKey = getServerVapidPublicKey();
+  if (!publicKey) {
+    return {
+      ready: false,
+      error: 'VAPID_PUBLIC_KEY não configurada nas variáveis de ambiente do servidor.',
+    };
+  }
   if (!privateKey) {
     return {
       ready: false,
@@ -38,7 +39,7 @@ function ensureWebPushConfigured() {
     return { ready: true };
   } catch (err) {
     console.warn('Aviso ao configurar VAPID:', err?.message || err);
-    return { ready: false, error: 'VAPID_PRIVATE_KEY inválida no servidor.' };
+    return { ready: false, error: 'Chaves VAPID inválidas no servidor.' };
   }
 }
 
@@ -174,6 +175,8 @@ export async function sendDualChannelPush(input) {
   let failedCount = 0;
   let fcmSentCount = 0;
   let fcmFailedCount = 0;
+  let vapidErrorCount = 0;
+  let lastPushStatusCode;
   const expiredEndpoints = [];
 
   const jsonPayload = JSON.stringify({
@@ -199,8 +202,16 @@ export async function sendDualChannelPush(input) {
           sentCount++;
         } catch (pushErr) {
           failedCount++;
-          if (pushErr?.statusCode === 410 || pushErr?.statusCode === 404) {
+          const statusCode = Number(pushErr?.statusCode);
+          if (Number.isFinite(statusCode) && statusCode > 0) {
+            lastPushStatusCode = statusCode;
+          }
+          // Apenas 410/404 indicam inscrição definitivamente expirada; 401/403 são erro VAPID/auth e NÃO devem apagar inscrições
+          if (statusCode === 410 || statusCode === 404) {
             expiredEndpoints.push(sub.endpoint);
+          } else if (statusCode === 401 || statusCode === 403) {
+            vapidErrorCount++;
+            console.warn(`Falha VAPID/autorização (${statusCode}) ao enviar Web Push; inscrição mantida.`);
           }
         }
       })
@@ -229,8 +240,8 @@ export async function sendDualChannelPush(input) {
             : {
                 title: safeTitle,
                 body: safeBody,
-                icon: '/pwa-192x192.png?v=21',
-                badge: '/pwa-192x192.png?v=21',
+                icon: '/pwa-192x192.png?v=20',
+                badge: '/pwa-192x192.png?v=20',
                 tag: safeTag,
                 renotify: true,
                 requireInteraction: true,
@@ -247,18 +258,46 @@ export async function sendDualChannelPush(input) {
     }
   }
 
+  if (hasAdminCreds && expiredEndpoints.length > 0) {
+    try {
+      const db = admin.firestore();
+      const uniqueExpired = Array.from(new Set(expiredEndpoints));
+      for (let i = 0; i < uniqueExpired.length; i += 10) {
+        const batch = uniqueExpired.slice(i, i + 10);
+        const expiredSnap = await db
+          .collection('players')
+          .where('pushSubscription.endpoint', 'in', batch)
+          .get();
+        await Promise.allSettled(
+          expiredSnap.docs.map((pDoc) =>
+            pDoc.ref.update({
+              pushSubscription: admin.firestore.FieldValue.delete(),
+            })
+          )
+        );
+      }
+    } catch (cleanErr) {
+      console.warn('Aviso ao limpar endpoints 410/404 expirados no Firestore:', cleanErr);
+    }
+  }
+
   let warning;
-  if (!webPushCheck.ready && uniqueSubsMap.size > 0) {
+  if (!webPushCheck.ready && uniqueSubsMap.size > 0 && fcmSentCount === 0) {
     warning = webPushCheck.error;
+  } else if (vapidErrorCount > 0 && sentCount === 0 && fcmSentCount === 0) {
+    warning =
+      'Falha de autenticação VAPID (401/403) ao enviar Web Push. Verifique se VAPID_PUBLIC_KEY, VITE_VAPID_PUBLIC_KEY e VAPID_PRIVATE_KEY correspondem ao mesmo par.';
   }
 
   return {
-    ok: webPushCheck.ready || hasAdminCreds,
+    ok: (webPushCheck.ready || hasAdminCreds) && !(vapidErrorCount > 0 && sentCount === 0 && fcmSentCount === 0),
     sentCount,
     failedCount,
     fcmSentCount,
     fcmFailedCount,
     expiredEndpoints,
+    vapidErrorCount,
+    ...(lastPushStatusCode !== undefined ? { lastPushStatusCode } : {}),
     title: safeTitle,
     warning,
   };

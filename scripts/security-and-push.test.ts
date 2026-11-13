@@ -20,7 +20,7 @@ import {
 } from '../api/_push.mjs';
 import verifyReceiptHandler from '../api/verify-receipt.ts';
 import sendNotificationHandler from '../api/send-notification.ts';
-import { VAPID_PUBLIC_KEY } from '../constants/vapid.ts';
+import { VAPID_PUBLIC_KEY, isValidVapidPublicKey } from '../constants/vapid.ts';
 
 function b64url(input: string | Buffer): string {
   return Buffer.from(input)
@@ -157,14 +157,19 @@ test('Push Validation & Sanitization: rejects unsafe URLs, HTTP endpoints, and o
   assert.equal(result.sentCount, 0);
 });
 
-test('VAPID Public Key & Secret Hygiene: valid 65-byte EC point, dynamic env rotation, and no hardcoded private key in server.ts', () => {
-  const pad = '='.repeat((4 - (VAPID_PUBLIC_KEY.length % 4)) % 4);
-  const raw = Buffer.from((VAPID_PUBLIC_KEY + pad).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-  assert.equal(raw.length, 65);
-  assert.equal(raw[0], 0x04);
-
+test('VAPID Public Key & Secret Hygiene: no old fallback key, valid 65-byte EC point check, and dynamic env rotation', () => {
+  const oldHardcodedPublicKey = 'BIXN8KDG-7IS82_ykSdcgndt1wyVaWnz0Y5TLBAPWSJRhbPXV5sHpN2TxxhwA3ZwdOUbVPjhYxFmenwVciZN2xE';
+  const constantsSource = fs.readFileSync(path.join(process.cwd(), 'constants', 'vapid.ts'), 'utf8');
+  const swSource = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf8');
+  const pushSource = fs.readFileSync(path.join(process.cwd(), 'api', '_push.mjs'), 'utf8');
   const serverSource = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf8');
+
+  assert.equal(constantsSource.includes(oldHardcodedPublicKey), false);
+  assert.equal(swSource.includes(oldHardcodedPublicKey), false);
+  assert.equal(pushSource.includes(oldHardcodedPublicKey), false);
   assert.equal(serverSource.includes('nwQxXctm5wIIykYEsCXfKGbCWh8zjsvF38cJGkUiAps'), false);
+
+  assert.equal(isValidVapidPublicKey('invalid-key'), false);
 
   const prevPriv = process.env.VAPID_PRIVATE_KEY;
   const prevPub = process.env.VAPID_PUBLIC_KEY;
@@ -172,9 +177,11 @@ test('VAPID Public Key & Secret Hygiene: valid 65-byte EC point, dynamic env rot
     delete process.env.VAPID_PRIVATE_KEY;
     delete process.env.VAPID_PUBLIC_KEY;
     assert.equal(isWebPushConfigured(), false);
-    assert.equal(getServerVapidPublicKey(), VAPID_PUBLIC_KEY);
+    assert.equal(getServerVapidPublicKey(), '');
 
     const generated = webpush.generateVAPIDKeys();
+    assert.equal(isValidVapidPublicKey(generated.publicKey), true);
+
     process.env.VAPID_PUBLIC_KEY = generated.publicKey;
     process.env.VAPID_PRIVATE_KEY = generated.privateKey;
     assert.equal(getServerVapidPublicKey(), generated.publicKey);
@@ -185,6 +192,8 @@ test('VAPID Public Key & Secret Hygiene: valid 65-byte EC point, dynamic env rot
     if (prevPub === undefined) delete process.env.VAPID_PUBLIC_KEY;
     else process.env.VAPID_PUBLIC_KEY = prevPub;
   }
+
+  assert.equal(typeof VAPID_PUBLIC_KEY, 'string');
 });
 
 test('Receipt HMAC Signature: deterministic when secret is present', () => {
@@ -224,14 +233,22 @@ test('Firestore Rules Audit: enforces RBAC on matches, players, expenses, notifi
   assert.match(rules, /allow\s+read,\s*write:\s+if\s+false;/);
 });
 
-test('Service Worker & Pelada Business Rules Regression Check', () => {
+test('Service Worker, 410/404 vs 401/403 Separation & Pelada Business Rules Regression Check', () => {
   const sw = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf8');
-  assert.match(sw, /try\s*\{[\s\S]*importScripts/);
+  assert.equal(sw.includes('importScripts('), false);
+  assert.equal(sw.includes('?v=21'), false);
+  assert.match(sw, /ICON_VERSION\s*=\s*'v20'/);
+  assert.match(sw, /SET_VAPID_PUBLIC_KEY/);
   assert.match(sw, /addEventListener\('push'/);
   assert.match(sw, /addEventListener\('pushsubscriptionchange'/);
   assert.match(sw, /addEventListener\('periodicsync'/);
   assert.match(sw, /addEventListener\('notificationclick'/);
   assert.match(sw, /oa-shared-receipt-cache/);
+
+  const pushSrc = fs.readFileSync(path.join(process.cwd(), 'api', '_push.mjs'), 'utf8');
+  assert.match(pushSrc, /statusCode === 410 \|\| statusCode === 404/);
+  assert.match(pushSrc, /statusCode === 401 \|\| statusCode === 403/);
+  assert.match(pushSrc, /vapidErrorCount\+\+/);
 
   const playerList = fs.readFileSync(path.join(process.cwd(), 'pages', 'PlayerList.tsx'), 'utf8');
   assert.match(playerList, /gkSlots\s*=\s*4/);

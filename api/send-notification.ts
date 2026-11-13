@@ -39,7 +39,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const result = await sendDualChannelPush(parsedBody);
     return response.status(200).json({
       ...result,
-      success: true,
+      success: result.ok,
       successCount: result.sentCount + result.fcmSentCount,
       failureCount: result.failedCount + result.fcmFailedCount,
     });

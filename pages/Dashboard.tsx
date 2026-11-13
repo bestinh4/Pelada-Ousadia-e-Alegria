@@ -260,7 +260,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       if (newStatus === 'presente') {
         playSound('cheer');
         if (getNotificationStatus() === 'default') {
-          await requestNotificationPermission(user.uid);
+          await requestNotificationPermission(user.uid, currentPlayer?.id);
         }
       }
 
