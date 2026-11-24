@@ -278,7 +278,11 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
         }
       });
 
-      return nextSelectedIds;
+      const unchanged =
+        nextSelectedIds.size === previousSelectedIds.size &&
+        [...nextSelectedIds].every(id => previousSelectedIds.has(id));
+
+      return unchanged ? previousSelectedIds : nextSelectedIds;
     });
   }, [players]);
 
