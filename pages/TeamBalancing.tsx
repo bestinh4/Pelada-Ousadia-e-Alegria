@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Player, Page, Match } from '../types.ts';
 import { MatchSession, Team } from '../domain/types.ts';
@@ -258,11 +258,28 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     };
   }, []);
 
-  // Inicializar atletas confirmados na seleção
+  // Manter a seleção sincronizada: novos confirmados entram automaticamente,
+  // mas uma exclusão manual feita pelo administrador é preservada.
+  const previousConfirmedIdsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
-    if (confirmedPlayers.length > 0 && selectedIds.size === 0) {
-      setSelectedIds(new Set(confirmedPlayers.map(p => p.id)));
-    }
+    const currentConfirmedIds = new Set(confirmedPlayers.map(p => p.id));
+
+    setSelectedIds(previousSelectedIds => {
+      const nextSelectedIds = new Set(
+        [...previousSelectedIds].filter(id => currentConfirmedIds.has(id))
+      );
+
+      currentConfirmedIds.forEach(id => {
+        if (!previousConfirmedIdsRef.current.has(id)) {
+          nextSelectedIds.add(id);
+        }
+      });
+
+      return nextSelectedIds;
+    });
+
+    previousConfirmedIdsRef.current = currentConfirmedIds;
   }, [players]);
 
   // Auto-cura: Se algum atleta desistiu (status === 'ausente') após o sorteio, retira-o imediatamente das equipes e dos reservas
@@ -295,293 +312,159 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
     }
   }, [players, session?.teams, session?.reserves, isAdm]);
 
-  // Executar o sorteio oficial das equipes com divisão tática rigorosa e justa
+  // Sorteio sequencial: cada equipe recebe até 6 jogadores de linha antes da próxima.
+  // Goleiros ocupam apenas a vaga específica de goleiro; vagas sem GK ficam para rodízio manual.
   const handleGenerateOfficialTeams = async () => {
     if (!isAdm) return;
-    const selectedPlayers = players.filter(p => selectedIds.has(p.id));
+
+    const selectedPlayers = confirmedPlayers.filter(p => selectedIds.has(p.id));
     if (selectedPlayers.length < 4) {
-      return alert("Selecione pelo menos 4 atletas para realizar o sorteio.");
+      return alert("Selecione pelo menos 4 atletas confirmados para realizar o sorteio.");
     }
 
     setIsGenerating(true);
     playSound('cheer');
 
-    // Animação visual de sorteio
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // 1. Separar goleiros e atletas de linha
-    const gks = selectedPlayers
-      .filter(p => getPositionSector(p.position) === 'goleiro')
-      .sort(() => Math.random() - 0.5);
-
-    const fieldPlayers = selectedPlayers
-      .filter(p => getPositionSector(p.position) !== 'goleiro');
-
-    const numTeams = 5;
-    const teams: Team[] = Array.from({ length: numTeams }, (_, i) => {
-      const theme = TEAM_THEMES[i] || { name: `TIME ${i + 1}` };
-      return {
-        id: `team_${i + 1}_${Date.now()}`,
-        name: theme.name,
-        playerIds: [],
-        hasGoalkeeper: false,
-        consecutiveWins: 0,
-        totalWins: 0,
-        isIncomplete: false
-      };
-    });
-
-    const reservePlayerIds: string[] = [];
-
-    // 2. Distribuir exatamente até 4 Goleiros oficiais (Time 1 a Time 4)
-    // Se houver 5º goleiro confirmado, ele vai para o Time 5. Excedentes vão para os reservas.
-    for (let i = 0; i < Math.min(numTeams, gks.length); i++) {
-      const gk = gks[i];
-      teams[i].playerIds.push(gk.id);
-      teams[i].hasGoalkeeper = true;
-    }
-    for (let i = numTeams; i < gks.length; i++) {
-      reservePlayerIds.push(gks[i].id);
-    }
-
-    // 3. Capacidade de Linha e Metas por Equipe:
-    // Capacidade oficial: 6 atletas de linha por equipe (máximo 30 titulares de linha nas 5 equipes).
-    // O excedente acima de 30 atletas de linha vai automaticamente para os reservas/suplentes.
-    const maxFieldPerTeam = 6;
-    const maxTotalField = numTeams * maxFieldPerTeam; // 30 atletas de linha
-    const fieldToAssignCount = Math.min(maxTotalField, fieldPlayers.length);
-
-    // Divisão rigorosamente equilibrada de vagas entre as equipes:
-    // Ex: 30 atletas -> [6, 6, 6, 6, 6]
-    // Ex: 29 atletas -> [6, 6, 6, 6, 5]
-    // Ex: 28 atletas -> [6, 6, 6, 5, 5]
-    // Ex: 25 atletas -> [5, 5, 5, 5, 5]
-    const baseFieldSize = Math.floor(fieldToAssignCount / numTeams);
-    const extraSlots = fieldToAssignCount % numTeams;
-    const targetFieldSizes = Array.from({ length: numTeams }, (_, i) =>
-      baseFieldSize + (i < extraSlots ? 1 : 0)
-    );
-
-    // 4. Agrupamento rigoroso de atletas por categoria posicional exata (Zagueiro, Volante, Meia, Atacante)
-    const categories: ('zagueiro' | 'volante' | 'meia' | 'atacante')[] = [
-      'zagueiro',
-      'volante',
-      'meia',
-      'atacante'
-    ];
-
-    const pools: Record<'zagueiro' | 'volante' | 'meia' | 'atacante', Player[]> = {
-      zagueiro: [],
-      volante: [],
-      meia: [],
-      atacante: []
-    };
-
-    fieldPlayers.forEach(p => {
-      const cat = getPositionCategory(p.position) as 'zagueiro' | 'volante' | 'meia' | 'atacante';
-      if (pools[cat]) {
-        pools[cat].push(p);
-      } else {
-        pools.meia.push(p);
-      }
-    });
-
-    // Embaralhar para garantir alternância e sorteio justo a cada semana
-    categories.forEach(c => {
-      pools[c].sort(() => Math.random() - 0.5);
-    });
-
-    // Se houver mais atletas de linha do que o limite oficial (30), separar excedentes para os suplentes
-    const trimmedPools: Record<'zagueiro' | 'volante' | 'meia' | 'atacante', Player[]> = {
-      zagueiro: [...pools.zagueiro],
-      volante: [...pools.volante],
-      meia: [...pools.meia],
-      atacante: [...pools.atacante]
-    };
-
-    let totalInPools = categories.reduce((sum, c) => sum + trimmedPools[c].length, 0);
-    let excessToReserves = totalInPools - fieldToAssignCount;
-    while (excessToReserves > 0) {
-      let largestCat = categories[0];
-      for (const c of categories) {
-        if (trimmedPools[c].length > trimmedPools[largestCat].length) {
-          largestCat = c;
-        }
-      }
-      const excessPlayer = trimmedPools[largestCat].pop();
-      if (excessPlayer) {
-        reservePlayerIds.push(excessPlayer.id);
-      }
-      excessToReserves--;
-    }
-
-    // Rastreamento exato de posições por equipe
-    const teamPosCounts: Array<Record<'zagueiro' | 'volante' | 'meia' | 'atacante', number>> = 
-      Array.from({ length: numTeams }, () => ({
-        zagueiro: 0,
-        volante: 0,
-        meia: 0,
-        atacante: 0
-      }));
-
-    const getTeamFieldTotal = (tIdx: number) => {
-      const c = teamPosCounts[tIdx];
-      return c.zagueiro + c.volante + c.meia + c.atacante;
-    };
-
-    // 5. DISTRIBUIÇÃO ESTRITA POR COTAS EQUITATIVAS:
-    // Garante matematicamente: |count(Time A, Posição) - count(Time B, Posição)| <= 1!
-    // Para N equipes e K atletas de uma posição:
-    // Todo time recebe Math.floor(K / N) atletas da posição.
-    // Exatamente (K % N) times recebem +1 atleta da posição.
-    // NENHUM time terá 3 zagueiros enquanto outro tem 0 ou 1!
-    for (const cat of categories) {
-      const list = trimmedPools[cat];
-      const baseQuota = Math.floor(list.length / numTeams);
-      const remainder = list.length % numTeams;
-
-      // 5.1 Cota base igual para todos os times
-      for (let i = 0; i < numTeams; i++) {
-        for (let k = 0; k < baseQuota; k++) {
-          if (list.length > 0 && getTeamFieldTotal(i) < targetFieldSizes[i]) {
-            const athlete = list.pop()!;
-            teams[i].playerIds.push(athlete.id);
-            teamPosCounts[i][cat]++;
-          }
-        }
-      }
-
-      // 5.2 Distribuir o excedente (+1) apenas para times que têm vaga aberta
-      if (remainder > 0) {
-        const eligibleIndices = Array.from({ length: numTeams }, (_, i) => i)
-          .filter(i => getTeamFieldTotal(i) < targetFieldSizes[i])
-          .sort((a, b) => {
-            const diff = getTeamFieldTotal(a) - getTeamFieldTotal(b);
-            if (diff !== 0) return diff;
-            return Math.random() - 0.5;
-          });
-
-        for (let k = 0; k < remainder && k < eligibleIndices.length; k++) {
-          const tIdx = eligibleIndices[k];
-          if (list.length > 0 && getTeamFieldTotal(tIdx) < targetFieldSizes[tIdx]) {
-            const athlete = list.pop()!;
-            teams[tIdx].playerIds.push(athlete.id);
-            teamPosCounts[tIdx][cat]++;
-          }
-        }
-      }
-    }
-
-    // 5.3 Preencher eventuais vagas abertas
-    for (const cat of categories) {
-      while (trimmedPools[cat].length > 0) {
-        const openIdx = Array.from({ length: numTeams }, (_, i) => i)
-          .find(i => getTeamFieldTotal(i) < targetFieldSizes[i]);
-        if (openIdx === undefined) break;
-
-        const athlete = trimmedPools[cat].pop()!;
-        teams[openIdx].playerIds.push(athlete.id);
-        teamPosCounts[openIdx][cat]++;
-      }
-    }
-
-    // 6. OTIMIZADOR DE INVARIANTE TÁTICA (DETERMINISTIC SWAP OPTIMIZER)
-    // Se por qualquer razão de preenchimento alguma posição tiver diferença > 1 entre equipes,
-    // realiza trocas automáticas compensatórias entre equipes para zerar o desbalanceamento.
-    for (let pass = 0; pass < 50; pass++) {
-      let swapped = false;
-      for (const cat of categories) {
-        const counts = teams.map((_, i) => teamPosCounts[i][cat]);
-        const maxC = Math.max(...counts);
-        const minC = Math.min(...counts);
-
-        if (maxC - minC > 1) {
-          const richTeamIdx = counts.indexOf(maxC);
-          const poorTeamIdx = counts.indexOf(minC);
-
-          for (const otherCat of categories) {
-            if (otherCat === cat) continue;
-            if (teamPosCounts[poorTeamIdx][otherCat] > teamPosCounts[richTeamIdx][otherCat]) {
-              const pIdToMove = teams[richTeamIdx].playerIds.find(id => {
-                const p = selectedPlayers.find(sp => sp.id === id) || players.find(sp => sp.id === id);
-                return p && getPositionCategory(p.position) === cat;
-              });
-              const pIdToReturn = teams[poorTeamIdx].playerIds.find(id => {
-                const p = selectedPlayers.find(sp => sp.id === id) || players.find(sp => sp.id === id);
-                return p && getPositionCategory(p.position) === otherCat;
-              });
-
-              if (pIdToMove && pIdToReturn) {
-                teams[richTeamIdx].playerIds = teams[richTeamIdx].playerIds.filter(id => id !== pIdToMove);
-                teams[richTeamIdx].playerIds.push(pIdToReturn);
-                teamPosCounts[richTeamIdx][cat]--;
-                teamPosCounts[richTeamIdx][otherCat]++;
-
-                teams[poorTeamIdx].playerIds = teams[poorTeamIdx].playerIds.filter(id => id !== pIdToReturn);
-                teams[poorTeamIdx].playerIds.push(pIdToMove);
-                teamPosCounts[poorTeamIdx][cat]++;
-                teamPosCounts[poorTeamIdx][otherCat]--;
-
-                swapped = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-      if (!swapped) break;
-    }
-
-    // Ordenar os atletas de cada time na sequência tática oficial: Goleiro -> Defensores -> Meio-Campistas -> Atacantes
-    teams.forEach(t => {
-      t.playerIds = sortTeamPlayerIds(t.playerIds);
-      const teamGKs = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position === 'Goleiro');
-      const teamField = t.playerIds.filter(pid => players.find(p => p.id === pid)?.position !== 'Goleiro');
-      t.hasGoalkeeper = teamGKs.length > 0;
-      t.isIncomplete = teamField.length < 6;
-    });
-
-    const sortedReserves = sortTeamPlayerIds(reservePlayerIds);
-
-    const newSession: MatchSession = {
-      id: "current",
-      status: "waiting",
-      matchDate: match?.date || new Date().toISOString().split('T')[0],
-      location: match?.location || "Granja Cantinho do Céu",
-      teams: teams,
-      waitingQueue: teams.slice(2).map(t => t.id),
-      activeMatch: {
-        teamAId: teams[0]?.id || null,
-        teamBId: teams[1]?.id || null,
-        scoreA: 0,
-        scoreB: 0,
-        startedAt: null
-      },
-      createdAt: Date.now(),
-      drawDate: new Date().toISOString(),
-      courtPresence: {},
-      reserves: sortedReserves
-    };
-
     try {
+      // Animação visual de sorteio
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const gks = selectedPlayers
+        .filter(p => getPositionSector(p.position) === 'goleiro')
+        .sort(() => Math.random() - 0.5);
+
+      const fieldPlayers = selectedPlayers
+        .filter(p => getPositionSector(p.position) !== 'goleiro');
+
+      const maxTeams = TEAM_THEMES.length;
+      const maxFieldPlayers = maxTeams * 6;
+
+      // Embaralhamento uniforme dos jogadores de linha, sem redistribuição entre equipes.
+      const shuffledFieldPlayers = [...fieldPlayers];
+      for (let i = shuffledFieldPlayers.length - 1; i > 0; i--) {
+        const randomIndex = Math.floor(Math.random() * (i + 1));
+        [shuffledFieldPlayers[i], shuffledFieldPlayers[randomIndex]] =
+          [shuffledFieldPlayers[randomIndex], shuffledFieldPlayers[i]];
+      }
+
+      // O número de equipes depende dos jogadores de linha disponíveis, limitado à capacidade existente.
+      const fieldPlayersToAssign = shuffledFieldPlayers.slice(0, maxFieldPlayers);
+      const numTeams = Math.max(
+        1,
+        Math.min(maxTeams, Math.ceil(fieldPlayersToAssign.length / 6))
+      );
+
+      const drawTimestamp = Date.now();
+      const teams: Team[] = Array.from({ length: numTeams }, (_, i) => {
+        const theme = TEAM_THEMES[i] || { name: `TIME ${i + 1}` };
+        return {
+          id: `team_${i + 1}_${drawTimestamp}`,
+          name: theme.name,
+          playerIds: [],
+          hasGoalkeeper: false,
+          consecutiveWins: 0,
+          totalWins: 0,
+          isIncomplete: false
+        };
+      });
+
+      const reservePlayerIds: string[] = shuffledFieldPlayers
+        .slice(maxFieldPlayers)
+        .map(p => p.id);
+
+      // Goleiros são atribuídos somente à vaga de GK dos primeiros times.
+      // Se uma equipe ficar sem goleiro, o administrador decide o rodízio manualmente.
+      for (let i = 0; i < Math.min(numTeams, gks.length); i++) {
+        teams[i].playerIds.push(gks[i].id);
+        teams[i].hasGoalkeeper = true;
+      }
+
+      // Goleiros excedentes ao número de equipes permanecem na lista de reservas,
+      // sem serem convertidos em jogadores de linha.
+      for (let i = numTeams; i < gks.length; i++) {
+        reservePlayerIds.push(gks[i].id);
+      }
+
+      // Preencher uma equipe por vez: 6 jogadores de linha no Time 1,
+      // depois 6 no Time 2, e assim sucessivamente.
+      fieldPlayersToAssign.forEach((player, index) => {
+        const teamIndex = Math.floor(index / 6);
+        teams[teamIndex].playerIds.push(player.id);
+      });
+
+      teams.forEach(team => {
+        team.playerIds = sortTeamPlayerIds(team.playerIds);
+        const teamGKs = team.playerIds.filter(
+          playerId => players.find(p => p.id === playerId)?.position === 'Goleiro'
+        );
+        const teamFieldPlayers = team.playerIds.filter(
+          playerId => getPositionSector(players.find(p => p.id === playerId)?.position) !== 'goleiro'
+        );
+        team.hasGoalkeeper = teamGKs.length > 0;
+        team.isIncomplete = teamFieldPlayers.length < 6;
+      });
+
+      const sortedReserves = sortTeamPlayerIds(reservePlayerIds);
+
+      // Trava de integridade: nenhum atleta selecionado pode sumir ou aparecer duplicado.
+      const allAssignedIds = [
+        ...teams.flatMap(team => team.playerIds),
+        ...sortedReserves
+      ];
+      const uniqueAssignedIds = new Set(allAssignedIds);
+      const selectedIdsSet = new Set(selectedPlayers.map(player => player.id));
+      if (
+        uniqueAssignedIds.size !== allAssignedIds.length ||
+        selectedIdsSet.size !== selectedPlayers.length ||
+        uniqueAssignedIds.size !== selectedIdsSet.size ||
+        [...selectedIdsSet].some(id => !uniqueAssignedIds.has(id))
+      ) {
+        throw new Error("A conferência de integridade do sorteio encontrou atleta ausente ou duplicado.");
+      }
+
+      const newSession: MatchSession = {
+        id: "current",
+        status: "waiting",
+        matchDate: match?.date || new Date().toISOString().split('T')[0],
+        location: match?.location || "Granja Cantinho do Céu",
+        teams,
+        waitingQueue: teams.slice(2).map(team => team.id),
+        activeMatch: {
+          teamAId: teams[0]?.id || null,
+          teamBId: teams[1]?.id || null,
+          scoreA: 0,
+          scoreB: 0,
+          startedAt: null
+        },
+        createdAt: Date.now(),
+        drawDate: new Date().toISOString(),
+        courtPresence: {},
+        reserves: sortedReserves
+      };
+
       await setDoc(doc(db, "sessions", "current"), newSession);
       playWhistleSound('double');
 
-      // Notificar todos os participantes com apito duplo de sorteio
       try {
         await broadcastNotification(
-          "⚽ 5 EQUIPES SORTEADAS!",
-          "A Diretoria realizou o sorteio oficial das 5 equipes com divisão tática rigorosa e justa! Confira a escalação completa no App.",
+          `⚽ ${teams.length} EQUIPES SORTEADAS!`,
+          `A Diretoria realizou o sorteio sequencial de ${teams.length} equipes. Confira a escalação no App.`,
           user?.uid,
           'all',
           'double'
         );
       } catch {}
 
-      alert("Sorteio oficial realizado com sucesso!\n\nAs 5 equipes foram distribuídas com critério tático rigoroso: divisão justa e equilibrada de zagueiros, volantes, meias e atacantes.");
+      alert(
+        `Sorteio realizado com sucesso!\\n\\n${teams.length} equipes foram montadas em sequência, com até 6 jogadores de linha por equipe. As vagas de goleiro sem ocupante ficam disponíveis para rodízio decidido pelo administrador.`
+      );
     } catch (e) {
       console.error(e);
-      alert("Erro ao salvar o sorteio.");
+      alert(
+        e instanceof Error
+          ? e.message
+          : "Erro ao realizar ou salvar o sorteio."
+      );
     } finally {
       setIsGenerating(false);
     }
@@ -2291,7 +2174,7 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
                   </div>
 
                   <p className="font-body-sm text-xs text-outline leading-relaxed">
-                    ⚖️ <strong>Critério Tático Rigoroso:</strong> O sorteio distribui cotas matematicamente equilibradas de Zagueiros, Volantes, Meias e Atacantes entre todas as equipes. Nenhum time fica com excesso ou escassez de uma posição.
+                    🎲 <strong>Sorteio sequencial:</strong> cada equipe recebe até 6 jogadores de linha antes de começar a próxima. Os goleiros ocupam vagas próprias; quando faltar goleiro, o rodízio é decidido pelo administrador.
                   </p>
 
                   {isAdm ? (
