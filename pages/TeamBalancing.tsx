@@ -264,6 +264,8 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
 
   useEffect(() => {
     const currentConfirmedIds = new Set(confirmedPlayers.map(p => p.id));
+    const previouslyConfirmedIds = previousConfirmedIdsRef.current;
+    previousConfirmedIdsRef.current = currentConfirmedIds;
 
     setSelectedIds(previousSelectedIds => {
       const nextSelectedIds = new Set(
@@ -271,15 +273,13 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
       );
 
       currentConfirmedIds.forEach(id => {
-        if (!previousConfirmedIdsRef.current.has(id)) {
+        if (!previouslyConfirmedIds.has(id)) {
           nextSelectedIds.add(id);
         }
       });
 
       return nextSelectedIds;
     });
-
-    previousConfirmedIdsRef.current = currentConfirmedIds;
   }, [players]);
 
   // Auto-cura: Se algum atleta desistiu (status === 'ausente') após o sorteio, retira-o imediatamente das equipes e dos reservas
