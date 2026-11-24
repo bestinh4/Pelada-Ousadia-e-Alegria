@@ -401,7 +401,8 @@ const TeamBalancing: React.FC<TeamBalancingProps> = ({
           playerId => getPositionSector(players.find(p => p.id === playerId)?.position) !== 'goleiro'
         );
         team.hasGoalkeeper = teamGKs.length > 0;
-        team.isIncomplete = teamFieldPlayers.length < 6;
+        // Uma equipe só está completa com 6 jogadores de linha e 1 goleiro.
+        team.isIncomplete = teamFieldPlayers.length < 6 || teamGKs.length < 1;
       });
 
       const sortedReserves = sortTeamPlayerIds(reservePlayerIds);
